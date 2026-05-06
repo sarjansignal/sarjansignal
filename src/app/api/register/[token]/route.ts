@@ -11,11 +11,6 @@ export async function GET(_: Request, { params }: { params: Promise<{ token: str
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   if (!data || !data.is_active) return NextResponse.json({ error: "Invalid or inactive link" }, { status: 404 });
 
-  await admin
-    .from("package_links")
-    .update({ click_count: Number((data as { click_count?: number }).click_count ?? 0) + 1, last_clicked_at: new Date().toISOString() })
-    .eq("token", token);
-
   return NextResponse.json({ ok: true, package_name: data.package_name, duration_days: data.duration_days, agent_name: (data as { agent_name?: string | null }).agent_name ?? null });
 }
 
@@ -112,6 +107,20 @@ export async function POST(req: Request, { params }: { params: Promise<{ token: 
   }
 
   if (keyErrorMsg) return NextResponse.json({ error: keyErrorMsg }, { status: 500 });
+
+  const { data: linkCounterData } = await admin
+    .from("package_links")
+    .select("click_count")
+    .eq("token", token)
+    .maybeSingle();
+
+  await admin
+    .from("package_links")
+    .update({
+      click_count: Number((linkCounterData as { click_count?: number } | null)?.click_count ?? 0) + 1,
+      last_clicked_at: new Date().toISOString(),
+    })
+    .eq("token", token);
 
   return NextResponse.json({ ok: true, access_key: accessKey, expired_at: expiresAt, package_name: link.package_name, duration_days: link.duration_days });
 }
