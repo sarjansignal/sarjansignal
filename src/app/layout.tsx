@@ -13,8 +13,13 @@ const plusJakartaSans = Plus_Jakarta_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "SARJAN SIGNAL SYSTEM",
+  title: "SARJAN SIGNAL",
   description: "Trading Disiplin, Arahan Sarjan.",
+  icons: {
+    icon: "/sarjan-logo.png",
+    shortcut: "/sarjan-logo.png",
+    apple: "/sarjan-logo.png",
+  },
 };
 
 export default function RootLayout({
