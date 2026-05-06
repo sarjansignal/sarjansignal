@@ -25,6 +25,7 @@ type Incoming = {
 };
 
 const GOLD_PIPS_MULTIPLIER = 10;
+const SIGNAL_DUPLICATE_COOLDOWN_SECONDS = Number(process.env.SIGNAL_DUPLICATE_COOLDOWN_SECONDS ?? "90");
 
 function asNumber(value: unknown): number | null {
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
@@ -235,6 +236,42 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  if (entryTarget === null || livePrice === null || sl === null || tp1 === null || tp2 === null) {
+    return NextResponse.json(
+      { error: "entry_target (or entry), live_price (or price), sl (or stop_loss), tp1, tp2 are required numbers" },
+      { status: 400 },
+    );
+  }
+
+  if (event === "signal") {
+    const cooldownFromIso = new Date(Date.now() - Math.max(10, SIGNAL_DUPLICATE_COOLDOWN_SECONDS) * 1000).toISOString();
+    const { data: maybeDup, error: dupError } = await admin
+      .from("signals")
+      .select("id, entry_target, created_at, status")
+      .eq("pair", pair)
+      .eq("mode", mode)
+      .eq("type", type)
+      .eq("status", "active")
+      .gte("created_at", cooldownFromIso)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (dupError) {
+      return NextResponse.json({ error: dupError.message }, { status: 500 });
+    }
+
+    if (maybeDup && Math.abs(Number(maybeDup.entry_target) - entryTarget) < 0.05) {
+      return NextResponse.json({
+        ok: true,
+        duplicate_ignored: true,
+        reason: "cooldown_active",
+        signal_id: maybeDup.id,
+        cooldown_seconds: Math.max(10, SIGNAL_DUPLICATE_COOLDOWN_SECONDS),
+      });
+    }
+  }
+
   // On new signal event, archive previous active signal (same pair + mode) into performance history
   // so history remains continuous even when no explicit signal_closed/TP/SL event is sent.
   if (event === "signal") {
@@ -271,13 +308,6 @@ export async function POST(req: NextRequest) {
         peak_pips: peakPips,
       });
     }
-  }
-
-  if (entryTarget === null || livePrice === null || sl === null || tp1 === null || tp2 === null) {
-    return NextResponse.json(
-      { error: "entry_target (or entry), live_price (or price), sl (or stop_loss), tp1, tp2 are required numbers" },
-      { status: 400 },
-    );
   }
 
   const { data, error } = await admin

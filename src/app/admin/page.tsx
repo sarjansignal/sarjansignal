@@ -38,6 +38,28 @@ type PackageLink = {
   created_at: string;
 };
 
+type WebhookHealth = {
+  latest_signal: {
+    id: string;
+    mode: "scalping" | "intraday";
+    type: "buy" | "sell";
+    status: string;
+    created_at: string;
+    updated_at: string | null;
+  } | null;
+  latest_performance: {
+    id: string;
+    mode: "scalping" | "intraday";
+    type: "buy" | "sell";
+    outcome: "tp1" | "tp2" | "tp3" | "sl" | "be";
+    created_at: string;
+  } | null;
+  active_signal_count: number;
+  signals_last_hour: number;
+  signal_lag_seconds: number | null;
+  performance_lag_seconds: number | null;
+};
+
 function formatAdminDate(value: string | null) {
   if (!value) return "-";
   return new Date(value).toLocaleString("en-GB", {
@@ -52,6 +74,15 @@ function formatAdminDate(value: string | null) {
   });
 }
 
+function formatLag(seconds: number | null) {
+  if (seconds === null) return "-";
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return `${h}h ${m}m`;
+}
+
 export default function AdminPage() {
   const [adminKey, setAdminKey] = useState("");
   const [authorized, setAuthorized] = useState(false);
@@ -59,6 +90,7 @@ export default function AdminPage() {
   const [subs, setSubs] = useState<Subscriber[]>([]);
   const [logs, setLogs] = useState<PerfLog[]>([]);
   const [links, setLinks] = useState<PackageLink[]>([]);
+  const [health, setHealth] = useState<WebhookHealth | null>(null);
   const [status, setStatus] = useState<string>("");
 
   const [newSub, setNewSub] = useState({
@@ -85,16 +117,21 @@ export default function AdminPage() {
   const [perfMode, setPerfMode] = useState<"all" | "scalping" | "intraday">("all");
   const [perfFrom, setPerfFrom] = useState("");
   const [perfTo, setPerfTo] = useState("");
+  const [subRowsPerPage, setSubRowsPerPage] = useState<number | "all">(10);
+  const [subPage, setSubPage] = useState(1);
+  const [perfRowsPerPage, setPerfRowsPerPage] = useState<number | "all">(10);
+  const [perfPage, setPerfPage] = useState(1);
 
   const headers = useMemo(() => ({ "x-admin-key": adminKey }), [adminKey]);
 
   const loadAll = async () => {
     try {
       setStatus("Syncing admin data...");
-      const [sRes, pRes, lRes] = await Promise.all([
+      const [sRes, pRes, lRes, hRes] = await Promise.all([
         fetch("/api/admin/subscribers", { headers }),
         fetch("/api/admin/performance-logs", { headers }),
         fetch("/api/admin/package-links", { headers }),
+        fetch("/api/admin/webhook-health", { headers }),
       ]);
 
       if (sRes.status === 401 || pRes.status === 401 || lRes.status === 401) {
@@ -103,14 +140,17 @@ export default function AdminPage() {
         return;
       }
 
-      const [sJson, pJson, lJson] = await Promise.all([sRes.json(), pRes.json(), lRes.json()]);
+      const [sJson, pJson, lJson, hJson] = await Promise.all([sRes.json(), pRes.json(), lRes.json(), hRes.json()]);
       if (!sRes.ok) throw new Error(sJson.error ?? "Failed loading subscribers.");
       if (!pRes.ok) throw new Error(pJson.error ?? "Failed loading performance logs.");
       if (!lRes.ok) throw new Error(lJson.error ?? "Failed loading package links.");
+      if (!hRes.ok) throw new Error(hJson.error ?? "Failed loading webhook health.");
+      if (!hJson?.ok) throw new Error(hJson?.error ?? "Failed loading webhook health.");
 
       setSubs(sJson.data ?? []);
       setLogs(pJson.data ?? []);
       setLinks(lJson.data ?? []);
+      setHealth((hJson.data ?? null) as WebhookHealth | null);
       setAuthorized(true);
       setStatus("Admin data synced.");
     } catch (error) {
@@ -163,9 +203,89 @@ export default function AdminPage() {
     });
   }, [logs, perfMode, perfStartMs, perfEndMs]);
 
+  const totalPerfPages = useMemo(() => {
+    if (perfRowsPerPage === "all") return 1;
+    return Math.max(1, Math.ceil(filteredPerfLogs.length / perfRowsPerPage));
+  }, [filteredPerfLogs.length, perfRowsPerPage]);
+
+  const visiblePerfLogs = useMemo(() => {
+    if (perfRowsPerPage === "all") return filteredPerfLogs;
+    const start = (perfPage - 1) * perfRowsPerPage;
+    return filteredPerfLogs.slice(start, start + perfRowsPerPage);
+  }, [filteredPerfLogs, perfRowsPerPage, perfPage]);
+
+  const subscriberOverview = useMemo(() => {
+    const nowMs = Date.now();
+    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+    const weekAgoMs = nowMs - sevenDaysMs;
+
+    const total = subs.length;
+    const active = subs.filter((s) => s.status === "active").length;
+    const inactive = subs.filter((s) => s.status !== "active").length;
+    const expiringSoon = subs.filter((s) => {
+      if (!s.key_expired_at) return false;
+      const expiryMs = new Date(s.key_expired_at).getTime();
+      return expiryMs >= nowMs && expiryMs <= nowMs + sevenDaysMs;
+    }).length;
+    const expiredKeys = subs.filter((s) => {
+      if (!s.key_expired_at) return false;
+      return new Date(s.key_expired_at).getTime() < nowMs;
+    }).length;
+    const loggedInToday = subs.filter((s) => {
+      if (!s.last_login_at) return false;
+      const d = new Date(s.last_login_at);
+      const now = new Date();
+      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+    }).length;
+    const newThisWeek = subs.filter((s) => new Date(s.created_at).getTime() >= weekAgoMs).length;
+    const package7D = subs.filter((s) => /7D/i.test(s.package_name)).length;
+    const package15D = subs.filter((s) => /15D/i.test(s.package_name)).length;
+    const package30D = subs.filter((s) => /30D/i.test(s.package_name)).length;
+
+    return {
+      total,
+      active,
+      inactive,
+      expiringSoon,
+      expiredKeys,
+      loggedInToday,
+      newThisWeek,
+      package7D,
+      package15D,
+      package30D,
+    };
+  }, [subs]);
+
+  const totalSubPages = useMemo(() => {
+    if (subRowsPerPage === "all") return 1;
+    return Math.max(1, Math.ceil(subs.length / subRowsPerPage));
+  }, [subs.length, subRowsPerPage]);
+
+  const visibleSubs = useMemo(() => {
+    if (subRowsPerPage === "all") return subs;
+    const start = (subPage - 1) * subRowsPerPage;
+    return subs.slice(start, start + subRowsPerPage);
+  }, [subs, subRowsPerPage, subPage]);
+
   useEffect(() => {
     setSelectedPerfIds((prev) => prev.filter((id) => filteredPerfLogs.some((l) => l.id === id)));
   }, [filteredPerfLogs]);
+
+  useEffect(() => {
+    setSubPage(1);
+  }, [subRowsPerPage]);
+
+  useEffect(() => {
+    if (subPage > totalSubPages) setSubPage(totalSubPages);
+  }, [subPage, totalSubPages]);
+
+  useEffect(() => {
+    setPerfPage(1);
+  }, [perfMode, perfRange, perfFrom, perfTo, perfRowsPerPage]);
+
+  useEffect(() => {
+    if (perfPage > totalPerfPages) setPerfPage(totalPerfPages);
+  }, [perfPage, totalPerfPages]);
 
   const createSubscriber = async () => {
     const res = await fetch("/api/admin/subscribers", {
@@ -363,6 +483,35 @@ export default function AdminPage() {
     setStatus("Register link copied.");
   };
 
+  const exportPerfCsv = () => {
+    const rows = filteredPerfLogs;
+    const header = ["Time", "Mode", "Type", "Outcome", "Net Pips", "Peak Pips"];
+    const csvRows = rows.map((r) => [
+      formatAdminDate(r.created_at),
+      r.mode,
+      r.type,
+      r.outcome.toUpperCase(),
+      r.net_pips.toFixed(1),
+      r.peak_pips === null ? "" : String(r.peak_pips),
+    ]);
+    const escapeCsv = (value: string) => `"${value.replace(/"/g, '""')}"`;
+    const content = [header, ...csvRows]
+      .map((line) => line.map((v) => escapeCsv(String(v))).join(","))
+      .join("\n");
+
+    const blob = new Blob([`${content}\n`], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    a.href = url;
+    a.download = `sarjan-performance-${perfMode}-${perfRange}-${stamp}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    setStatus(`Exported ${rows.length} performance rows.`);
+  };
+
   if (!authorized) {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-100 p-6">
@@ -396,6 +545,19 @@ export default function AdminPage() {
 
         {tab === "subs" ? (
           <section className="space-y-4">
+            <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
+              <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-3"><p className="text-xs text-slate-400">Total Subscribers</p><p className="mt-1 text-lg font-semibold">{subscriberOverview.total}</p></div>
+              <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-3"><p className="text-xs text-slate-400">Active Subscribers</p><p className="mt-1 text-lg font-semibold text-emerald-300">{subscriberOverview.active}</p></div>
+              <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-3"><p className="text-xs text-slate-400">Inactive Subscribers</p><p className="mt-1 text-lg font-semibold text-rose-300">{subscriberOverview.inactive}</p></div>
+              <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-3"><p className="text-xs text-slate-400">Expiring Soon (7D)</p><p className="mt-1 text-lg font-semibold">{subscriberOverview.expiringSoon}</p></div>
+              <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-3"><p className="text-xs text-slate-400">Expired Keys</p><p className="mt-1 text-lg font-semibold text-rose-300">{subscriberOverview.expiredKeys}</p></div>
+              <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-3"><p className="text-xs text-slate-400">Logged In Today</p><p className="mt-1 text-lg font-semibold">{subscriberOverview.loggedInToday}</p></div>
+              <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-3"><p className="text-xs text-slate-400">New This Week</p><p className="mt-1 text-lg font-semibold">{subscriberOverview.newThisWeek}</p></div>
+              <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-3"><p className="text-xs text-slate-400">Package 7D</p><p className="mt-1 text-lg font-semibold">{subscriberOverview.package7D}</p></div>
+              <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-3"><p className="text-xs text-slate-400">Package 15D</p><p className="mt-1 text-lg font-semibold">{subscriberOverview.package15D}</p></div>
+              <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-3"><p className="text-xs text-slate-400">Package 30D</p><p className="mt-1 text-lg font-semibold">{subscriberOverview.package30D}</p></div>
+            </section>
+
             <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-4">
               <p className="mb-3 font-semibold">Create Subscriber</p>
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
@@ -413,6 +575,54 @@ export default function AdminPage() {
             </div>
 
             <div className="overflow-x-auto rounded-xl border border-slate-700 bg-slate-900/60">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 px-3 py-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-400">Rows:</span>
+                  <select
+                    value={String(subRowsPerPage)}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      setSubRowsPerPage(raw === "all" ? "all" : Number(raw));
+                    }}
+                    className="rounded border border-slate-600 bg-slate-950 px-2 py-2 text-xs"
+                  >
+                    <option value="10">10</option>
+                    <option value="20">20</option>
+                    <option value="30">30</option>
+                    <option value="40">40</option>
+                    <option value="50">50</option>
+                    <option value="all">Show All</option>
+                  </select>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs text-slate-400">
+                    Showing {visibleSubs.length} of {subs.length} records
+                  </span>
+                  {subRowsPerPage !== "all" && (
+                    <span className="text-xs text-slate-400">
+                      Page {subPage} / {totalSubPages}
+                    </span>
+                  )}
+                  {subRowsPerPage !== "all" && (
+                    <button
+                      onClick={() => setSubPage((prev) => Math.max(1, prev - 1))}
+                      disabled={subPage <= 1}
+                      className="rounded border border-slate-600 bg-slate-900 px-3 py-2 text-xs font-semibold hover:bg-slate-800 disabled:opacity-40"
+                    >
+                      Prev
+                    </button>
+                  )}
+                  {subRowsPerPage !== "all" && (
+                    <button
+                      onClick={() => setSubPage((prev) => Math.min(totalSubPages, prev + 1))}
+                      disabled={subPage >= totalSubPages}
+                      className="rounded border border-slate-600 bg-slate-900 px-3 py-2 text-xs font-semibold hover:bg-slate-800 disabled:opacity-40"
+                    >
+                      Next
+                    </button>
+                  )}
+                </div>
+              </div>
               <table className="w-full text-left text-sm">
                 <thead className="bg-slate-800/80">
                   <tr>
@@ -429,7 +639,7 @@ export default function AdminPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {subs.map((s) => (
+                  {visibleSubs.map((s) => (
                     <tr key={s.id} className="border-t border-slate-800">
                       <td className="px-3 py-2">
                         {editingSubId === s.id ? (
@@ -492,48 +702,130 @@ export default function AdminPage() {
           </section>
         ) : tab === "perf" ? (
           <section className="space-y-3">
+            {health && (
+              <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-3">
+                  <p className="text-xs text-slate-400">Last Signal</p>
+                  <p className="mt-1 text-sm font-semibold">{health.latest_signal ? `${health.latest_signal.mode} ${health.latest_signal.type}` : "-"}</p>
+                  <p className="text-xs text-slate-400">{health.latest_signal ? formatAdminDate(health.latest_signal.updated_at ?? health.latest_signal.created_at) : "-"}</p>
+                </div>
+                <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-3">
+                  <p className="text-xs text-slate-400">Last Signal Lag</p>
+                  <p className="mt-1 text-sm font-semibold">{formatLag(health.signal_lag_seconds)}</p>
+                  <p className="text-xs text-slate-400">Signals in 1h: {health.signals_last_hour}</p>
+                </div>
+                <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-3">
+                  <p className="text-xs text-slate-400">Last Performance</p>
+                  <p className="mt-1 text-sm font-semibold">{health.latest_performance ? health.latest_performance.outcome.toUpperCase() : "-"}</p>
+                  <p className="text-xs text-slate-400">{health.latest_performance ? formatAdminDate(health.latest_performance.created_at) : "-"}</p>
+                </div>
+                <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-3">
+                  <p className="text-xs text-slate-400">Active Signals</p>
+                  <p className="mt-1 text-sm font-semibold">{health.active_signal_count}</p>
+                  <p className="text-xs text-slate-400">Perf lag: {formatLag(health.performance_lag_seconds)}</p>
+                </div>
+              </section>
+            )}
+
             <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-3">
-              <div className="flex flex-wrap items-end gap-2">
-                <select
-                  value={perfMode}
-                  onChange={(e) => setPerfMode(e.target.value as "all" | "scalping" | "intraday")}
-                  className="rounded border border-slate-600 bg-slate-950 px-3 py-2 text-sm"
-                >
-                  <option value="all">All Modes</option>
-                  <option value="scalping">Scalping</option>
-                  <option value="intraday">Intraday</option>
-                </select>
-                <button onClick={() => setPerfRange("day")} className={`rounded border px-3 py-2 text-xs font-semibold ${perfRange === "day" ? "border-blue-400 bg-blue-600 text-white" : "border-slate-600 bg-slate-900 hover:bg-slate-800"}`}>Day</button>
-                <button onClick={() => setPerfRange("week")} className={`rounded border px-3 py-2 text-xs font-semibold ${perfRange === "week" ? "border-blue-400 bg-blue-600 text-white" : "border-slate-600 bg-slate-900 hover:bg-slate-800"}`}>Week</button>
-                <button onClick={() => setPerfRange("month")} className={`rounded border px-3 py-2 text-xs font-semibold ${perfRange === "month" ? "border-blue-400 bg-blue-600 text-white" : "border-slate-600 bg-slate-900 hover:bg-slate-800"}`}>Month</button>
-                <button onClick={() => setPerfRange("custom")} className={`rounded border px-3 py-2 text-xs font-semibold ${perfRange === "custom" ? "border-blue-400 bg-blue-600 text-white" : "border-slate-600 bg-slate-900 hover:bg-slate-800"}`}>Custom</button>
-                {perfRange === "custom" && (
-                  <>
-                    <input type="date" value={perfFrom} onChange={(e) => setPerfFrom(e.target.value)} className="rounded border border-slate-600 bg-slate-950 px-2 py-2 text-xs" />
-                    <input type="date" value={perfTo} onChange={(e) => setPerfTo(e.target.value)} className="rounded border border-slate-600 bg-slate-950 px-2 py-2 text-xs" />
-                  </>
-                )}
-                <div className="ml-auto flex items-center gap-2">
-                  <button
-                    onClick={() => setSelectedPerfIds(filteredPerfLogs.map((l) => l.id))}
-                    className="rounded border border-slate-600 bg-slate-900 px-3 py-2 text-xs font-semibold hover:bg-slate-800"
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-end gap-2">
+                  <select
+                    value={perfMode}
+                    onChange={(e) => setPerfMode(e.target.value as "all" | "scalping" | "intraday")}
+                    className="rounded border border-slate-600 bg-slate-950 px-3 py-2 text-sm"
                   >
-                    Select All
-                  </button>
-                  <button
-                    onClick={() => setSelectedPerfIds([])}
-                    className="rounded border border-slate-600 bg-slate-900 px-3 py-2 text-xs font-semibold hover:bg-slate-800"
-                  >
-                    Clear
-                  </button>
-                  <button
-                    onClick={() => void deleteSelectedLogs()}
-                    disabled={!selectedPerfIds.length}
-                    className="rounded border border-rose-500 bg-rose-700 px-3 py-2 text-xs font-semibold hover:bg-rose-600 disabled:opacity-40"
-                  >
-                    Delete Selected ({selectedPerfIds.length})
-                  </button>
-                  <span className="text-xs text-slate-400">Showing {filteredPerfLogs.length} logs</span>
+                    <option value="all">All Modes</option>
+                    <option value="scalping">Scalping</option>
+                    <option value="intraday">Intraday</option>
+                  </select>
+                  <button onClick={() => setPerfRange("day")} className={`rounded border px-3 py-2 text-xs font-semibold ${perfRange === "day" ? "border-blue-400 bg-blue-600 text-white" : "border-slate-600 bg-slate-900 hover:bg-slate-800"}`}>Day</button>
+                  <button onClick={() => setPerfRange("week")} className={`rounded border px-3 py-2 text-xs font-semibold ${perfRange === "week" ? "border-blue-400 bg-blue-600 text-white" : "border-slate-600 bg-slate-900 hover:bg-slate-800"}`}>Week</button>
+                  <button onClick={() => setPerfRange("month")} className={`rounded border px-3 py-2 text-xs font-semibold ${perfRange === "month" ? "border-blue-400 bg-blue-600 text-white" : "border-slate-600 bg-slate-900 hover:bg-slate-800"}`}>Month</button>
+                  <button onClick={() => setPerfRange("custom")} className={`rounded border px-3 py-2 text-xs font-semibold ${perfRange === "custom" ? "border-blue-400 bg-blue-600 text-white" : "border-slate-600 bg-slate-900 hover:bg-slate-800"}`}>Custom</button>
+                  {perfRange === "custom" && (
+                    <>
+                      <input type="date" value={perfFrom} onChange={(e) => setPerfFrom(e.target.value)} className="rounded border border-slate-600 bg-slate-950 px-2 py-2 text-xs" />
+                      <input type="date" value={perfTo} onChange={(e) => setPerfTo(e.target.value)} className="rounded border border-slate-600 bg-slate-950 px-2 py-2 text-xs" />
+                    </>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-800 pt-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-slate-400">Rows:</span>
+                      <select
+                        value={String(perfRowsPerPage)}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          setPerfRowsPerPage(raw === "all" ? "all" : Number(raw));
+                        }}
+                        className="rounded border border-slate-600 bg-slate-950 px-2 py-2 text-xs"
+                      >
+                        <option value="10">10</option>
+                        <option value="20">20</option>
+                        <option value="30">30</option>
+                        <option value="40">40</option>
+                        <option value="50">50</option>
+                        <option value="all">Show All</option>
+                      </select>
+                    </div>
+                    <button
+                      onClick={() => setSelectedPerfIds(filteredPerfLogs.map((l) => l.id))}
+                      className="rounded border border-slate-600 bg-slate-900 px-3 py-2 text-xs font-semibold hover:bg-slate-800"
+                    >
+                      Select All
+                    </button>
+                    <button
+                      onClick={() => setSelectedPerfIds([])}
+                      className="rounded border border-slate-600 bg-slate-900 px-3 py-2 text-xs font-semibold hover:bg-slate-800"
+                    >
+                      Clear
+                    </button>
+                    <button
+                      onClick={() => void deleteSelectedLogs()}
+                      disabled={!selectedPerfIds.length}
+                      className="rounded border border-rose-500 bg-rose-700 px-3 py-2 text-xs font-semibold hover:bg-rose-600 disabled:opacity-40"
+                    >
+                      Delete Selected ({selectedPerfIds.length})
+                    </button>
+                    <button
+                      onClick={exportPerfCsv}
+                      className="rounded border border-emerald-500 bg-emerald-700 px-3 py-2 text-xs font-semibold hover:bg-emerald-600"
+                    >
+                      Export CSV
+                    </button>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-slate-400">
+                      Showing {visiblePerfLogs.length} of {filteredPerfLogs.length} records
+                    </span>
+                    {perfRowsPerPage !== "all" && (
+                      <span className="text-xs text-slate-400">
+                        Page {perfPage} / {totalPerfPages}
+                      </span>
+                    )}
+                    {perfRowsPerPage !== "all" && (
+                      <button
+                        onClick={() => setPerfPage((prev) => Math.max(1, prev - 1))}
+                        disabled={perfPage <= 1}
+                        className="rounded border border-slate-600 bg-slate-900 px-3 py-2 text-xs font-semibold hover:bg-slate-800 disabled:opacity-40"
+                      >
+                        Prev
+                      </button>
+                    )}
+                    {perfRowsPerPage !== "all" && (
+                      <button
+                        onClick={() => setPerfPage((prev) => Math.min(totalPerfPages, prev + 1))}
+                        disabled={perfPage >= totalPerfPages}
+                        className="rounded border border-slate-600 bg-slate-900 px-3 py-2 text-xs font-semibold hover:bg-slate-800 disabled:opacity-40"
+                      >
+                        Next
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -554,7 +846,7 @@ export default function AdminPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredPerfLogs.map((l) => {
+                {visiblePerfLogs.map((l) => {
                   const d = editDraft[l.id] ?? {
                     outcome: l.outcome,
                     net_pips: String(l.net_pips),

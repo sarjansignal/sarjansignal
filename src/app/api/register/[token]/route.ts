@@ -20,10 +20,28 @@ export async function POST(req: Request, { params }: { params: Promise<{ token: 
   const { token } = await params;
 
   const body = (await req.json()) as { name?: string; email?: string; phone?: string };
-  if (!body.name || !body.email) return NextResponse.json({ error: "name and email are required" }, { status: 400 });
+  if (!body.name || !body.email || !body.phone) {
+    return NextResponse.json({ error: "name, email and phone are required" }, { status: 400 });
+  }
   const normalizedEmail = body.email.trim().toLowerCase();
-  const normalizedName = body.name.trim();
-  const normalizedPhone = body.phone?.trim() || null;
+  const normalizedName = body.name.trim().replace(/\s+/g, " ");
+  const normalizedPhone = body.phone.trim();
+
+  const nameParts = normalizedName.split(" ").filter(Boolean);
+  if (
+    normalizedName.length < 3 ||
+    nameParts.length < 2 ||
+    nameParts.some((p) => p.length < 2) ||
+    !/^[A-Za-z\s'.-]+$/.test(normalizedName)
+  ) {
+    return NextResponse.json({ error: "Please enter a valid full name (first and last name)." }, { status: 400 });
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+    return NextResponse.json({ error: "Please enter a valid email address." }, { status: 400 });
+  }
+  if (!/^\+?[0-9]{9,15}$/.test(normalizedPhone)) {
+    return NextResponse.json({ error: "Please enter a valid phone number (9-15 digits)." }, { status: 400 });
+  }
 
   const { data: link, error: linkError } = await admin.from("package_links").select("package_name,duration_days,is_active,agent_name").eq("token", token).maybeSingle();
   if (linkError) return NextResponse.json({ error: linkError.message }, { status: 500 });

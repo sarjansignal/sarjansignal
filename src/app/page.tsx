@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, BarChart3, CalendarClock, Clipboard, Moon, Package, ShieldCheck, Signal, Sun, Timer, User } from "lucide-react";
 import { getSupabaseClient } from "@/lib/supabase";
 import type { AccessKey, PerformanceLog, Signal as TradingSignal, SignalMode } from "@/lib/types";
@@ -8,11 +8,21 @@ import type { AccessKey, PerformanceLog, Signal as TradingSignal, SignalMode } f
 type Tab = "signal" | "performance";
 type RangePreset = "day" | "week" | "month" | "custom";
 type DesignVariant = "tactical" | "executive";
+type LiveAlertKind = "signal" | "tp" | "sl";
+
+type LiveAlert = {
+  id: string;
+  kind: LiveAlertKind;
+  title: string;
+  message: string;
+  createdAt: number;
+};
 
 const SESSION_MINUTES = 120;
 const SCALPING_INTERVAL_SECONDS = 30 * 60;
 const INTRADAY_INTERVAL_SECONDS = 4 * 60 * 60;
 const GOLD_PIPS_MULTIPLIER = 10;
+const PERFORMANCE_DEFAULT_PAGE_SIZE = 10;
 
 function fmt(value: number) {
   return value.toFixed(2);
@@ -81,6 +91,21 @@ export default function Home() {
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const [designVariant, setDesignVariant] = useState<DesignVariant>("executive");
+  const [showLoginDisclaimer, setShowLoginDisclaimer] = useState(false);
+  const [performancePageSize, setPerformancePageSize] = useState<number | "all">(PERFORMANCE_DEFAULT_PAGE_SIZE);
+  const [performancePage, setPerformancePage] = useState(1);
+  const [liveAlerts, setLiveAlerts] = useState<LiveAlert[]>([]);
+  const [activeSignalPopup, setActiveSignalPopup] = useState<LiveAlert | null>(null);
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>("default");
+  const notifiedEventKeysRef = useRef<Set<string>>(new Set());
+
+  const pushLiveAlert = (alert: LiveAlert) => {
+    setLiveAlerts((prev) => [alert, ...prev].slice(0, 20));
+    setActiveSignalPopup(alert);
+    if (typeof window !== "undefined" && notificationPermission === "granted") {
+      new Notification(alert.title, { body: alert.message });
+    }
+  };
 
   const fetchDashboardData = async (sb: NonNullable<ReturnType<typeof getSupabaseClient>>) => {
     const [signalRes, serverLogRes] = await Promise.all([
@@ -119,6 +144,12 @@ export default function Home() {
   }, [designVariant]);
 
   useEffect(() => {
+    if (typeof window !== "undefined" && "Notification" in window) {
+      setNotificationPermission(Notification.permission);
+    }
+  }, []);
+
+  useEffect(() => {
     if (!authorized || !supabase) return;
     const t = setInterval(() => setSessionSeconds((s) => Math.max(0, s - 1)), 1000);
     return () => clearInterval(t);
@@ -134,22 +165,73 @@ export default function Home() {
     if (!authorized || !supabase) return;
     const sb = supabase;
 
+    if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "default") {
+      void Notification.requestPermission().then((permission) => setNotificationPermission(permission));
+    }
+
     const load = async () => {
       await fetchDashboardData(sb);
     };
 
     void load();
 
+    const handleSignalEvent = (payload: { eventType: "INSERT" | "UPDATE" | "DELETE"; new: Record<string, unknown> }) => {
+      if (payload.eventType === "DELETE") return;
+      const next = payload.new as TradingSignal;
+      setSignals((prev) => [next, ...prev.filter((s) => s.id !== next.id)].slice(0, 50));
+
+      if (next.status === "active") {
+        const eventKey = `signal:${next.id}`;
+        if (!notifiedEventKeysRef.current.has(eventKey)) {
+          notifiedEventKeysRef.current.add(eventKey);
+          pushLiveAlert({
+            id: eventKey,
+            kind: "signal",
+            title: `New ${next.mode.toUpperCase()} Signal`,
+            message: `${next.type.toUpperCase()} XAUUSD @ ${fmt(next.entry_target)}`,
+            createdAt: Date.now(),
+          });
+        }
+      }
+    };
+
+    const handlePerformanceEvent = (payload: { eventType: "INSERT" | "UPDATE" | "DELETE"; new: Record<string, unknown> }) => {
+      if (payload.eventType === "DELETE") return;
+      const next = payload.new as PerformanceLog;
+      setLogs((prev) => [next, ...prev.filter((s) => s.id !== next.id)].slice(0, 200));
+
+      const upperOutcome = next.outcome.toUpperCase();
+      const isTp = next.outcome === "tp1" || next.outcome === "tp2" || next.outcome === "tp3";
+      const isSl = next.outcome === "sl";
+      if (isTp || isSl) {
+        const eventKey = `performance:${next.id}:${next.outcome}`;
+        if (!notifiedEventKeysRef.current.has(eventKey)) {
+          notifiedEventKeysRef.current.add(eventKey);
+          pushLiveAlert({
+            id: eventKey,
+            kind: isTp ? "tp" : "sl",
+            title: isTp ? `${upperOutcome} Hit` : "Stop Loss Hit",
+            message: `${next.mode.toUpperCase()} ${next.type.toUpperCase()} | ${next.net_pips.toFixed(1)} pips`,
+            createdAt: Date.now(),
+          });
+        }
+      }
+    };
+
     const channel = sb
       .channel("sarjan-stream")
-      .on("postgres_changes", { event: "*", schema: "public", table: "signals" }, (payload) => {
-        const next = payload.new as TradingSignal;
-        setSignals((prev) => [next, ...prev.filter((s) => s.id !== next.id)].slice(0, 50));
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "performance_logs" }, (payload) => {
-        const next = payload.new as PerformanceLog;
-        setLogs((prev) => [next, ...prev.filter((s) => s.id !== next.id)].slice(0, 200));
-      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "signals" }, (payload) =>
+        handleSignalEvent(payload as unknown as { eventType: "INSERT" | "UPDATE" | "DELETE"; new: Record<string, unknown> }),
+      )
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "signals" }, (payload) =>
+        handleSignalEvent(payload as unknown as { eventType: "INSERT" | "UPDATE" | "DELETE"; new: Record<string, unknown> }),
+      )
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "performance_logs" }, (payload) =>
+        handlePerformanceEvent(payload as unknown as { eventType: "INSERT" | "UPDATE" | "DELETE"; new: Record<string, unknown> }),
+      )
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "performance_logs" }, (payload) =>
+        handlePerformanceEvent(payload as unknown as { eventType: "INSERT" | "UPDATE" | "DELETE"; new: Record<string, unknown> }),
+      )
       .subscribe();
 
     return () => {
@@ -296,6 +378,27 @@ export default function Home() {
     [logs, mode, rangeStartMs, rangeEndMs],
   );
 
+  const totalPerformancePages = useMemo(() => {
+    if (performancePageSize === "all") return 1;
+    return Math.max(1, Math.ceil(filteredLogs.length / performancePageSize));
+  }, [filteredLogs.length, performancePageSize]);
+
+  const visibleLogs = useMemo(() => {
+    if (performancePageSize === "all") return filteredLogs;
+    const start = (performancePage - 1) * performancePageSize;
+    return filteredLogs.slice(start, start + performancePageSize);
+  }, [filteredLogs, performancePageSize, performancePage]);
+
+  useEffect(() => {
+    setPerformancePage(1);
+  }, [mode, rangePreset, customFrom, customTo, performancePageSize]);
+
+  useEffect(() => {
+    if (performancePage > totalPerformancePages) {
+      setPerformancePage(totalPerformancePages);
+    }
+  }, [performancePage, totalPerformancePages]);
+
   const stats = useMemo(() => {
     const total = filteredLogs.length;
     const wins = filteredLogs.filter((l) => l.outcome !== "sl").length;
@@ -396,6 +499,7 @@ export default function Home() {
       setAccountPackage(parsedPackage);
       setSubscriptionExpiry(row.expired_at ?? null);
       setAuthorized(true);
+      setShowLoginDisclaimer(true);
     } finally {
       setLoadingAuth(false);
     }
@@ -416,6 +520,8 @@ export default function Home() {
     setAccountName("-");
     setAccountPackage("-");
     setSubscriptionExpiry(null);
+    setShowLoginDisclaimer(false);
+    setActiveSignalPopup(null);
   };
 
   const refreshNow = async () => {
@@ -759,7 +865,7 @@ export default function Home() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredLogs.map((item) => (
+                  {visibleLogs.map((item) => (
                     <tr key={item.id} className="border-t border-emerald-500/20">
                       <td className="px-3 py-2">{formatDateTime(item.created_at)}</td>
                       <td className={`px-3 py-2 uppercase ${item.type === "buy" ? "text-emerald-300" : "text-red-400"}`}>{item.type}</td>
@@ -770,9 +876,117 @@ export default function Home() {
                 </tbody>
               </table>
             </div>
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-2 text-emerald-300/70">
+                <span>Rows:</span>
+                <select
+                  value={String(performancePageSize)}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    setPerformancePageSize(raw === "all" ? "all" : Number(raw));
+                  }}
+                  className="rounded border border-emerald-400/40 bg-transparent px-2 py-1 text-emerald-300"
+                >
+                  <option value="10">10</option>
+                  <option value="20">20</option>
+                  <option value="50">50</option>
+                  <option value="all">Show All</option>
+                </select>
+              </div>
+              <p className="text-emerald-300/70">
+                Showing {visibleLogs.length} of {filteredLogs.length} records
+              </p>
+              <div className="flex items-center gap-2">
+                {performancePageSize !== "all" && (
+                  <span className="text-emerald-300/70">
+                    Page {performancePage} / {totalPerformancePages}
+                  </span>
+                )}
+                {performancePageSize !== "all" && (
+                  <button
+                    onClick={() => setPerformancePage((prev) => Math.max(1, prev - 1))}
+                    disabled={performancePage <= 1}
+                    className="rounded border border-emerald-400/40 px-3 py-1 text-emerald-300 hover:bg-emerald-500/15 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Prev
+                  </button>
+                )}
+                {performancePageSize !== "all" && (
+                  <button
+                    onClick={() => setPerformancePage((prev) => Math.min(totalPerformancePages, prev + 1))}
+                    disabled={performancePage >= totalPerformancePages}
+                    className="rounded border border-emerald-400/40 px-3 py-1 text-emerald-300 hover:bg-emerald-500/15 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Next
+                  </button>
+                )}
+              </div>
+            </div>
           </section>
         )}
       </div>
+      {showLoginDisclaimer && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/55 px-4">
+          <div className={`w-full max-w-xl rounded-2xl border p-6 text-center ${isDark ? "border-emerald-400/30 bg-slate-900 text-emerald-100" : "border-[#0f172a]/20 bg-[#f8fafc] text-[#0f172a]"}`}>
+            <h3 className={`text-xl font-bold ${isDark ? "text-emerald-200" : "text-[#1e3a8a]"}`}>Important Trading Disclaimer</h3>
+            <div className={`mt-4 space-y-3 text-center text-sm leading-relaxed ${isDark ? "text-emerald-100/90" : "text-[#334155]"}`}>
+              <p>Trading involves high risk, and past performance does not guarantee future results.</p>
+              <p>You are fully responsible for your own trading decisions and risk management.</p>
+              <p>By continuing, you acknowledge and accept these terms.</p>
+            </div>
+            <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+              <button
+                onClick={() => setShowLoginDisclaimer(false)}
+                className={`rounded-xl px-4 py-2 text-sm font-semibold ${isDark ? "border border-emerald-400/40 bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/25" : "border border-[#2563eb]/40 bg-[#2563eb] text-white hover:bg-[#1d4ed8]"}`}
+              >
+                I Understand, Continue
+              </button>
+              <button
+                onClick={logout}
+                className="rounded-xl border border-red-400/50 px-4 py-2 text-sm font-semibold text-red-400 hover:bg-red-500/10"
+              >
+                Log Out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {activeSignalPopup && (
+        <div className="fixed inset-0 z-40 grid place-items-center bg-black/45 px-4">
+          <div className={`w-full max-w-md rounded-2xl border p-5 text-center ${isDark ? "border-emerald-400/30 bg-slate-900 text-emerald-100" : "border-[#0f172a]/20 bg-[#f8fafc] text-[#0f172a]"}`}>
+            <p className={`text-xs uppercase tracking-[0.16em] ${activeSignalPopup.kind === "sl" ? "text-red-400" : "text-emerald-300"}`}>Live Alert</p>
+            <h3 className={`mt-1 text-xl font-bold ${isDark ? "text-emerald-200" : "text-[#1e3a8a]"}`}>{activeSignalPopup.title}</h3>
+            <p className={`mt-3 text-sm ${isDark ? "text-emerald-100/90" : "text-[#334155]"}`}>{activeSignalPopup.message}</p>
+            <button
+              onClick={() => setActiveSignalPopup(null)}
+              className={`mt-5 rounded-xl px-4 py-2 text-sm font-semibold ${isDark ? "border border-emerald-400/40 bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/25" : "border border-[#2563eb]/40 bg-[#2563eb] text-white hover:bg-[#1d4ed8]"}`}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+      {liveAlerts.length > 0 && (
+        <div className="fixed right-3 top-3 z-30 w-[320px] max-w-[85vw] space-y-2">
+          {liveAlerts.slice(0, 3).map((alert) => (
+            <div key={alert.id} className={`rounded-xl border p-3 shadow-lg ${isDark ? "border-emerald-500/30 bg-slate-900/95" : "border-[#0f172a]/20 bg-[#f8fafc]/95"}`}>
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className={`text-xs uppercase tracking-[0.16em] ${alert.kind === "sl" ? "text-red-400" : "text-emerald-300"}`}>{alert.kind === "signal" ? "Signal" : alert.kind.toUpperCase()}</p>
+                  <p className={`mt-0.5 text-sm font-semibold ${isDark ? "text-emerald-100" : "text-[#1e3a8a]"}`}>{alert.title}</p>
+                  <p className={`mt-1 text-xs ${isDark ? "text-emerald-100/80" : "text-[#334155]"}`}>{alert.message}</p>
+                </div>
+                <button
+                  onClick={() => setLiveAlerts((prev) => prev.filter((x) => x.id !== alert.id))}
+                  className={`rounded border px-2 py-0.5 text-[10px] ${isDark ? "border-emerald-500/40 text-emerald-200" : "border-[#0f172a]/20 text-[#334155]"}`}
+                >
+                  X
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </main>
   );
 }
