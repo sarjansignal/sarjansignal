@@ -478,7 +478,7 @@ export default function AdminPage() {
   };
 
   const copyLink = async (token: string) => {
-    const url = `${origin}/register/${token}`;
+    const url = `${origin}/r/${token}`;
     await navigator.clipboard.writeText(url);
     setStatus("Register link copied.");
   };
@@ -935,7 +935,7 @@ export default function AdminPage() {
                       <td className="px-3 py-2">{l.click_count ?? 0}</td>
                       <td className="px-3 py-2 text-xs">{formatAdminDate(l.last_clicked_at)}</td>
                       <td className="px-3 py-2 font-mono text-xs">
-                        <div className="max-w-[420px] truncate">{`${origin}/register/${l.token}`}</div>
+                        <div className="max-w-[420px] truncate">{`${origin}/r/${l.token}`}</div>
                       </td>
                       <td className="px-3 py-2">
                         <div className="flex gap-1">

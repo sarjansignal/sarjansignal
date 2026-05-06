@@ -24,19 +24,24 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "package_name and duration_days are required" }, { status: 400 });
   }
 
-  const token = generateToken(22);
-  const { data, error } = await admin
-    .from("package_links")
-    .insert({
-      token,
-      package_name: body.package_name,
-      duration_days: duration,
-      agent_name: body.agent_name ?? null,
-      is_active: true,
-    })
-    .select("*")
-    .single();
+  const MAX_RETRIES = 12;
+  for (let i = 0; i < MAX_RETRIES; i += 1) {
+    const token = generateToken(4);
+    const { data, error } = await admin
+      .from("package_links")
+      .insert({
+        token,
+        package_name: body.package_name,
+        duration_days: duration,
+        agent_name: body.agent_name ?? null,
+        is_active: true,
+      })
+      .select("*")
+      .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true, data });
+    if (!error) return NextResponse.json({ ok: true, data });
+    if (error.code !== "23505") return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ error: "Token collision. Please retry." }, { status: 500 });
 }
