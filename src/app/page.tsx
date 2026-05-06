@@ -69,7 +69,7 @@ export default function Home() {
   const [riskAmount, setRiskAmount] = useState("100");
   const [sessionSeconds, setSessionSeconds] = useState(SESSION_MINUTES * 60);
   const [nowMs, setNowMs] = useState(Date.now());
-  const [theme, setTheme] = useState<"dark" | "light">("dark");
+  const [theme, setTheme] = useState<"dark" | "light">("light");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastSync, setLastSync] = useState<string | null>(null);
   const [activeAccessKeyId, setActiveAccessKeyId] = useState<string | null>(null);
@@ -80,7 +80,7 @@ export default function Home() {
   const [rangePreset, setRangePreset] = useState<RangePreset>("week");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
-  const [designVariant, setDesignVariant] = useState<DesignVariant>("tactical");
+  const [designVariant, setDesignVariant] = useState<DesignVariant>("executive");
 
   const fetchDashboardData = async (sb: NonNullable<ReturnType<typeof getSupabaseClient>>) => {
     const [signalRes, serverLogRes] = await Promise.all([
