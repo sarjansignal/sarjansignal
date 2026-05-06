@@ -205,7 +205,7 @@ export default function RegisterPage({ params }: { params: Promise<{ token: stri
                 Download Key (.txt)
               </button>
               <a
-                href="/"
+                href="/access"
                 className={`rounded px-3 py-2 text-sm font-semibold ${isDark ? "border border-blue-400/60 bg-blue-500/20 text-blue-200 hover:bg-blue-500/30" : "border border-blue-700/50 bg-blue-100 text-blue-800 hover:bg-blue-200"}`}
               >
                 Go to Login
