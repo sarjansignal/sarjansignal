@@ -98,6 +98,9 @@ export default function Home() {
   const [activeSignalPopup, setActiveSignalPopup] = useState<LiveAlert | null>(null);
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>("default");
   const notifiedEventKeysRef = useRef<Set<string>>(new Set());
+  const initializedAlertSnapshotRef = useRef(false);
+  const lastSeenSignalIdRef = useRef<string | null>(null);
+  const lastSeenPerfIdRef = useRef<string | null>(null);
 
   const pushLiveAlert = (alert: LiveAlert) => {
     setLiveAlerts((prev) => [alert, ...prev].slice(0, 20));
@@ -148,6 +151,64 @@ export default function Home() {
       setNotificationPermission(Notification.permission);
     }
   }, []);
+
+  useEffect(() => {
+    if (!authorized) {
+      initializedAlertSnapshotRef.current = false;
+      lastSeenSignalIdRef.current = null;
+      lastSeenPerfIdRef.current = null;
+      return;
+    }
+    if (!signals.length && !logs.length) return;
+
+    if (!initializedAlertSnapshotRef.current) {
+      lastSeenSignalIdRef.current = signals[0]?.id ?? null;
+      lastSeenPerfIdRef.current = logs[0]?.id ?? null;
+      initializedAlertSnapshotRef.current = true;
+      return;
+    }
+
+    const latestSignal = signals[0];
+    if (latestSignal && latestSignal.id !== lastSeenSignalIdRef.current && latestSignal.status === "active") {
+      lastSeenSignalIdRef.current = latestSignal.id;
+      const eventKey = `signal:${latestSignal.id}`;
+      if (!notifiedEventKeysRef.current.has(eventKey)) {
+        notifiedEventKeysRef.current.add(eventKey);
+        pushLiveAlert({
+          id: eventKey,
+          kind: "signal",
+          title: `New ${latestSignal.mode.toUpperCase()} Signal`,
+          message: `${latestSignal.type.toUpperCase()} XAUUSD @ ${fmt(latestSignal.entry_target)}`,
+          createdAt: Date.now(),
+        });
+      }
+    } else if (latestSignal) {
+      lastSeenSignalIdRef.current = latestSignal.id;
+    }
+
+    const latestPerf = logs[0];
+    if (latestPerf && latestPerf.id !== lastSeenPerfIdRef.current) {
+      lastSeenPerfIdRef.current = latestPerf.id;
+      const isTp = latestPerf.outcome === "tp1" || latestPerf.outcome === "tp2" || latestPerf.outcome === "tp3";
+      const isSl = latestPerf.outcome === "sl";
+      if (isTp || isSl) {
+        const upperOutcome = latestPerf.outcome.toUpperCase();
+        const eventKey = `performance:${latestPerf.id}:${latestPerf.outcome}`;
+        if (!notifiedEventKeysRef.current.has(eventKey)) {
+          notifiedEventKeysRef.current.add(eventKey);
+          pushLiveAlert({
+            id: eventKey,
+            kind: isTp ? "tp" : "sl",
+            title: isTp ? `${upperOutcome} Hit` : "Stop Loss Hit",
+            message: `${latestPerf.mode.toUpperCase()} ${latestPerf.type.toUpperCase()} | ${latestPerf.net_pips.toFixed(1)} pips`,
+            createdAt: Date.now(),
+          });
+        }
+      }
+    } else if (latestPerf) {
+      lastSeenPerfIdRef.current = latestPerf.id;
+    }
+  }, [authorized, signals, logs]);
 
   useEffect(() => {
     if (!authorized || !supabase) return;
