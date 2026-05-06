@@ -78,6 +78,7 @@ export default function AdminPage() {
     status: "active",
   });
   const [editDraft, setEditDraft] = useState<Record<string, { outcome: PerfLog["outcome"]; net_pips: string; peak_pips: string; note: string }>>({});
+  const [selectedPerfIds, setSelectedPerfIds] = useState<string[]>([]);
   const [newLink, setNewLink] = useState({ package_name: "Package 7D", duration_days: "7", agent_name: "" });
   const [origin, setOrigin] = useState("");
   const [perfRange, setPerfRange] = useState<"day" | "week" | "month" | "custom">("week");
@@ -161,6 +162,10 @@ export default function AdminPage() {
       return ts >= perfStartMs && ts <= perfEndMs;
     });
   }, [logs, perfMode, perfStartMs, perfEndMs]);
+
+  useEffect(() => {
+    setSelectedPerfIds((prev) => prev.filter((id) => filteredPerfLogs.some((l) => l.id === id)));
+  }, [filteredPerfLogs]);
 
   const createSubscriber = async () => {
     const res = await fetch("/api/admin/subscribers", {
@@ -248,6 +253,49 @@ export default function AdminPage() {
     }
     setStatus("Performance log updated + audit saved.");
     await loadAll();
+  };
+
+  const deleteLog = async (id: string) => {
+    const ok = window.confirm("Delete this performance record?");
+    if (!ok) return;
+    const res = await fetch(`/api/admin/performance-logs/${id}`, { method: "DELETE", headers });
+    const json = await res.json();
+    if (!res.ok) {
+      setStatus(json.error ?? "Failed deleting performance log.");
+      return;
+    }
+    setStatus("Performance log deleted.");
+    setSelectedPerfIds((prev) => prev.filter((x) => x !== id));
+    await loadAll();
+  };
+
+  const deleteSelectedLogs = async () => {
+    if (!selectedPerfIds.length) return;
+    const ok = window.confirm(`Delete ${selectedPerfIds.length} selected performance records?`);
+    if (!ok) return;
+    const res = await fetch("/api/admin/performance-logs", {
+      method: "DELETE",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({ ids: selectedPerfIds }),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      setStatus(json.error ?? "Failed deleting selected logs.");
+      return;
+    }
+    setStatus(`Deleted ${selectedPerfIds.length} performance records.`);
+    setSelectedPerfIds([]);
+    await loadAll();
+  };
+
+  const togglePerfSelection = (id: string, checked: boolean) => {
+    setSelectedPerfIds((prev) => {
+      if (checked) {
+        if (prev.includes(id)) return prev;
+        return [...prev, id];
+      }
+      return prev.filter((x) => x !== id);
+    });
   };
 
   const createLink = async () => {
@@ -465,7 +513,28 @@ export default function AdminPage() {
                     <input type="date" value={perfTo} onChange={(e) => setPerfTo(e.target.value)} className="rounded border border-slate-600 bg-slate-950 px-2 py-2 text-xs" />
                   </>
                 )}
-                <span className="ml-auto text-xs text-slate-400">Showing {filteredPerfLogs.length} logs</span>
+                <div className="ml-auto flex items-center gap-2">
+                  <button
+                    onClick={() => setSelectedPerfIds(filteredPerfLogs.map((l) => l.id))}
+                    className="rounded border border-slate-600 bg-slate-900 px-3 py-2 text-xs font-semibold hover:bg-slate-800"
+                  >
+                    Select All
+                  </button>
+                  <button
+                    onClick={() => setSelectedPerfIds([])}
+                    className="rounded border border-slate-600 bg-slate-900 px-3 py-2 text-xs font-semibold hover:bg-slate-800"
+                  >
+                    Clear
+                  </button>
+                  <button
+                    onClick={() => void deleteSelectedLogs()}
+                    disabled={!selectedPerfIds.length}
+                    className="rounded border border-rose-500 bg-rose-700 px-3 py-2 text-xs font-semibold hover:bg-rose-600 disabled:opacity-40"
+                  >
+                    Delete Selected ({selectedPerfIds.length})
+                  </button>
+                  <span className="text-xs text-slate-400">Showing {filteredPerfLogs.length} logs</span>
+                </div>
               </div>
             </div>
 
@@ -473,6 +542,7 @@ export default function AdminPage() {
             <table className="w-full text-left text-sm">
               <thead className="bg-slate-800/80">
                 <tr>
+                  <th className="px-3 py-2">Tick</th>
                   <th className="px-3 py-2">Time</th>
                   <th className="px-3 py-2">Mode</th>
                   <th className="px-3 py-2">Type</th>
@@ -494,6 +564,14 @@ export default function AdminPage() {
 
                   return (
                     <tr key={l.id} className="border-t border-slate-800">
+                      <td className="px-3 py-2">
+                        <input
+                          type="checkbox"
+                          checked={selectedPerfIds.includes(l.id)}
+                          onChange={(e) => togglePerfSelection(l.id, e.target.checked)}
+                          className="h-4 w-4 accent-blue-600"
+                        />
+                      </td>
                       <td className="px-3 py-2">{formatAdminDate(l.created_at)}</td>
                       <td className="px-3 py-2">{l.mode}</td>
                       <td className="px-3 py-2">{l.type}</td>
@@ -505,7 +583,12 @@ export default function AdminPage() {
                       <td className="px-3 py-2"><input value={d.net_pips} onChange={(e) => setEditDraft((p) => ({ ...p, [l.id]: { ...d, net_pips: e.target.value } }))} className="w-24 rounded border border-slate-600 bg-slate-950 px-2 py-1" /></td>
                       <td className="px-3 py-2"><input value={d.peak_pips} onChange={(e) => setEditDraft((p) => ({ ...p, [l.id]: { ...d, peak_pips: e.target.value } }))} className="w-24 rounded border border-slate-600 bg-slate-950 px-2 py-1" /></td>
                       <td className="px-3 py-2"><input value={d.note} onChange={(e) => setEditDraft((p) => ({ ...p, [l.id]: { ...d, note: e.target.value } }))} className="w-48 rounded border border-slate-600 bg-slate-950 px-2 py-1" /></td>
-                      <td className="px-3 py-2"><button onClick={() => void saveLog(l.id)} className="rounded bg-blue-600 px-3 py-1">Save</button></td>
+                      <td className="px-3 py-2">
+                        <div className="flex gap-1">
+                          <button onClick={() => void saveLog(l.id)} className="rounded bg-blue-600 px-3 py-1">Save</button>
+                          <button onClick={() => void deleteLog(l.id)} className="rounded bg-rose-700 px-3 py-1">Delete</button>
+                        </div>
+                      </td>
                     </tr>
                   );
                 })}
