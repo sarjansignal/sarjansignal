@@ -36,6 +36,12 @@ function asNumber(value: unknown): number | null {
   return null;
 }
 
+function normalized(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const v = value.trim().toLowerCase();
+  return v.length ? v : null;
+}
+
 export async function POST(req: NextRequest) {
   const expectedSecret = process.env.TRADINGVIEW_WEBHOOK_SECRET;
   if (!expectedSecret) {
@@ -54,10 +60,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized webhook" }, { status: 401 });
   }
 
-  const pair = (body.pair ?? body.symbol ?? "XAUUSD").toUpperCase();
-  const event = body.event ?? "signal";
-  const mode = body.mode ?? body.strategy ?? "scalping";
-  const type = body.type ?? body.side ?? "buy";
+  const pair = String(body.pair ?? body.symbol ?? "XAUUSD").trim().toUpperCase();
+  const event = (normalized(body.event) ?? "signal") as "signal" | "price_update" | "signal_closed";
+  const mode = (normalized(body.mode) ?? normalized(body.strategy) ?? "scalping") as "scalping" | "intraday";
+  const type = (normalized(body.type) ?? normalized(body.side) ?? "buy") as "buy" | "sell";
   const entryTarget = asNumber(body.entry_target ?? body.entry);
   const livePrice = asNumber(body.live_price ?? body.price);
   const sl = asNumber(body.sl ?? body.stop_loss);
@@ -67,15 +73,24 @@ export async function POST(req: NextRequest) {
   const status = body.status ?? "active";
 
   if (!["scalping", "intraday"].includes(mode)) {
-    return NextResponse.json({ error: "mode/strategy must be scalping or intraday" }, { status: 400 });
+    return NextResponse.json(
+      { error: "mode/strategy must be scalping or intraday", received_mode: body.mode ?? body.strategy ?? null },
+      { status: 400 },
+    );
   }
 
   if (!["signal", "price_update", "signal_closed"].includes(event)) {
-    return NextResponse.json({ error: "event must be signal, price_update or signal_closed" }, { status: 400 });
+    return NextResponse.json(
+      { error: "event must be signal, price_update or signal_closed", received_event: body.event ?? null },
+      { status: 400 },
+    );
   }
 
-  if (!["buy", "sell"].includes(type)) {
-    return NextResponse.json({ error: "type/side must be buy or sell" }, { status: 400 });
+  if (event === "signal" && !["buy", "sell"].includes(type)) {
+    return NextResponse.json(
+      { error: "type/side must be buy or sell", received_type: body.type ?? body.side ?? null },
+      { status: 400 },
+    );
   }
 
   const admin = getSupabaseAdmin();
@@ -178,7 +193,7 @@ export async function POST(req: NextRequest) {
 
   if (event === "signal_closed") {
     const closePrice = asNumber(body.close_price ?? body.live_price ?? body.price);
-    const outcome = body.outcome ?? "tp1";
+    const outcome = (normalized(body.outcome) ?? "tp1") as "tp1" | "tp2" | "tp3" | "be" | "sl";
 
     if (!["tp1", "tp2", "tp3", "be", "sl"].includes(outcome)) {
       return NextResponse.json({ error: "outcome must be tp1, tp2, tp3, be or sl" }, { status: 400 });
