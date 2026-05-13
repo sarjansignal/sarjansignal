@@ -112,6 +112,8 @@ export default function AdminPage() {
   const [editDraft, setEditDraft] = useState<Record<string, { outcome: PerfLog["outcome"]; net_pips: string; peak_pips: string; note: string }>>({});
   const [selectedPerfIds, setSelectedPerfIds] = useState<string[]>([]);
   const [newLink, setNewLink] = useState({ package_name: "Package 7D", duration_days: "7", agent_name: "" });
+  const [editingLinkId, setEditingLinkId] = useState<string | null>(null);
+  const [editLinkDraft, setEditLinkDraft] = useState({ token: "", agent_name: "" });
   const [origin, setOrigin] = useState("");
   const [perfRange, setPerfRange] = useState<"day" | "week" | "month" | "custom">("week");
   const [perfMode, setPerfMode] = useState<"all" | "scalping" | "intraday">("all");
@@ -461,6 +463,38 @@ export default function AdminPage() {
       return;
     }
     setStatus("Link status updated.");
+    await loadAll();
+  };
+
+  const startEditLink = (link: PackageLink) => {
+    setEditingLinkId(link.id);
+    setEditLinkDraft({
+      token: link.token,
+      agent_name: link.agent_name ?? "",
+    });
+  };
+
+  const cancelEditLink = () => {
+    setEditingLinkId(null);
+    setEditLinkDraft({ token: "", agent_name: "" });
+  };
+
+  const saveLinkEdit = async (id: string) => {
+    const res = await fetch(`/api/admin/package-links/${id}`, {
+      method: "PATCH",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({
+        token: editLinkDraft.token,
+        agent_name: editLinkDraft.agent_name || null,
+      }),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      setStatus(json.error ?? "Failed updating package link.");
+      return;
+    }
+    setStatus("Package link updated.");
+    cancelEditLink();
     await loadAll();
   };
 
@@ -913,6 +947,7 @@ export default function AdminPage() {
                   <tr>
                     <th className="px-3 py-2">Package</th>
                     <th className="px-3 py-2">Days</th>
+                    <th className="px-3 py-2">Token</th>
                     <th className="px-3 py-2">Agent</th>
                     <th className="px-3 py-2">Status</th>
                     <th className="px-3 py-2">Clicks</th>
@@ -926,7 +961,28 @@ export default function AdminPage() {
                     <tr key={l.id} className="border-t border-slate-800">
                       <td className="px-3 py-2">{l.package_name}</td>
                       <td className="px-3 py-2">{l.duration_days}</td>
-                      <td className="px-3 py-2">{l.agent_name ?? "-"}</td>
+                      <td className="px-3 py-2 font-mono text-xs">
+                        {editingLinkId === l.id ? (
+                          <input
+                            value={editLinkDraft.token}
+                            onChange={(e) => setEditLinkDraft((s) => ({ ...s, token: e.target.value }))}
+                            className="w-40 rounded border border-slate-600 bg-slate-950 px-2 py-1"
+                          />
+                        ) : (
+                          l.token
+                        )}
+                      </td>
+                      <td className="px-3 py-2">
+                        {editingLinkId === l.id ? (
+                          <input
+                            value={editLinkDraft.agent_name}
+                            onChange={(e) => setEditLinkDraft((s) => ({ ...s, agent_name: e.target.value }))}
+                            className="w-36 rounded border border-slate-600 bg-slate-950 px-2 py-1"
+                          />
+                        ) : (
+                          l.agent_name ?? "-"
+                        )}
+                      </td>
                       <td className="px-3 py-2">
                         <span className={`rounded-full px-2 py-1 text-xs font-semibold ${l.is_active ? "bg-emerald-500/20 text-emerald-300" : "bg-rose-500/20 text-rose-300"}`}>
                           {l.is_active ? "active" : "inactive"}
@@ -939,11 +995,21 @@ export default function AdminPage() {
                       </td>
                       <td className="px-3 py-2">
                         <div className="flex gap-1">
-                          <button onClick={() => void copyLink(l.token)} className="rounded-lg bg-slate-700 px-2 py-1 text-xs font-semibold hover:bg-slate-600">Copy</button>
-                          <button onClick={() => void toggleLink(l.id, l.is_active)} className={`rounded-lg px-2 py-1 text-xs font-semibold ${l.is_active ? "bg-rose-600 hover:bg-rose-500" : "bg-emerald-600 hover:bg-emerald-500"}`}>
-                            {l.is_active ? "Disable" : "Enable"}
-                          </button>
-                          <button onClick={() => void deleteLink(l.id)} className="rounded-lg bg-rose-900 px-2 py-1 text-xs font-semibold hover:bg-rose-800">Delete</button>
+                          {editingLinkId === l.id ? (
+                            <>
+                              <button onClick={() => void saveLinkEdit(l.id)} className="rounded-lg bg-emerald-600 px-2 py-1 text-xs font-semibold hover:bg-emerald-500">Save</button>
+                              <button onClick={cancelEditLink} className="rounded-lg bg-slate-700 px-2 py-1 text-xs font-semibold hover:bg-slate-600">Cancel</button>
+                            </>
+                          ) : (
+                            <>
+                              <button onClick={() => void copyLink(l.token)} className="rounded-lg bg-slate-700 px-2 py-1 text-xs font-semibold hover:bg-slate-600">Copy</button>
+                              <button onClick={() => startEditLink(l)} className="rounded-lg bg-blue-600 px-2 py-1 text-xs font-semibold hover:bg-blue-500">Edit</button>
+                              <button onClick={() => void toggleLink(l.id, l.is_active)} className={`rounded-lg px-2 py-1 text-xs font-semibold ${l.is_active ? "bg-rose-600 hover:bg-rose-500" : "bg-emerald-600 hover:bg-emerald-500"}`}>
+                                {l.is_active ? "Disable" : "Enable"}
+                              </button>
+                              <button onClick={() => void deleteLink(l.id)} className="rounded-lg bg-rose-900 px-2 py-1 text-xs font-semibold hover:bg-rose-800">Delete</button>
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>
