@@ -546,6 +546,12 @@ export default function AdminPage() {
     setStatus(`Exported ${rows.length} performance rows.`);
   };
 
+  const logoutAdmin = () => {
+    setAuthorized(false);
+    setAdminKey("");
+    setStatus("Logged out.");
+  };
+
   if (!authorized) {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-100 p-6">
@@ -567,10 +573,19 @@ export default function AdminPage() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h1 className="text-2xl font-bold tracking-tight">SARJAN Admin CRM</h1>
             <div className="flex flex-wrap gap-2">
+              <a
+                href="/access"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-lg bg-indigo-700 px-3 py-2 text-sm font-semibold hover:bg-indigo-600"
+              >
+                Signal
+              </a>
               <button onClick={() => setTab("subs")} className={`rounded-lg px-3 py-2 text-sm font-semibold ${tab === "subs" ? "bg-blue-600" : "bg-slate-800 hover:bg-slate-700"}`}>Subscribers</button>
               <button onClick={() => setTab("perf")} className={`rounded-lg px-3 py-2 text-sm font-semibold ${tab === "perf" ? "bg-blue-600" : "bg-slate-800 hover:bg-slate-700"}`}>Performance Logs</button>
               <button onClick={() => setTab("links")} className={`rounded-lg px-3 py-2 text-sm font-semibold ${tab === "links" ? "bg-blue-600" : "bg-slate-800 hover:bg-slate-700"}`}>Package Links</button>
               <button onClick={() => void loadAll()} className="rounded-lg bg-slate-800 px-3 py-2 text-sm font-semibold hover:bg-slate-700">Refresh</button>
+              <button onClick={logoutAdmin} className="rounded-lg bg-rose-700 px-3 py-2 text-sm font-semibold hover:bg-rose-600">Log Out</button>
             </div>
           </div>
         </header>
