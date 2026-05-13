@@ -2,67 +2,6 @@
 
 import { useEffect, useState } from "react";
 
-type CountryPhone = {
-  code: string;
-  label: string;
-  dial: string;
-  trunkPrefix?: string;
-};
-
-const COUNTRY_OPTIONS: CountryPhone[] = [
-  { code: "AT", label: "Austria", dial: "+43", trunkPrefix: "0" },
-  { code: "BE", label: "Belgium", dial: "+32", trunkPrefix: "0" },
-  { code: "BN", label: "Brunei", dial: "+673", trunkPrefix: "0" },
-  { code: "DK", label: "Denmark", dial: "+45" },
-  { code: "FI", label: "Finland", dial: "+358", trunkPrefix: "0" },
-  { code: "FR", label: "France", dial: "+33", trunkPrefix: "0" },
-  { code: "DE", label: "Germany", dial: "+49", trunkPrefix: "0" },
-  { code: "ID", label: "Indonesia", dial: "+62", trunkPrefix: "0" },
-  { code: "IE", label: "Ireland", dial: "+353", trunkPrefix: "0" },
-  { code: "IT", label: "Italy", dial: "+39", trunkPrefix: "0" },
-  { code: "MY", label: "Malaysia", dial: "+60", trunkPrefix: "0" },
-  { code: "NL", label: "Netherlands", dial: "+31", trunkPrefix: "0" },
-  { code: "NO", label: "Norway", dial: "+47" },
-  { code: "PH", label: "Philippines", dial: "+63", trunkPrefix: "0" },
-  { code: "PT", label: "Portugal", dial: "+351", trunkPrefix: "0" },
-  { code: "SG", label: "Singapore", dial: "+65" },
-  { code: "ES", label: "Spain", dial: "+34" },
-  { code: "SE", label: "Sweden", dial: "+46", trunkPrefix: "0" },
-  { code: "CH", label: "Switzerland", dial: "+41", trunkPrefix: "0" },
-  { code: "TH", label: "Thailand", dial: "+66", trunkPrefix: "0" },
-  { code: "AE", label: "United Arab Emirates", dial: "+971", trunkPrefix: "0" },
-  { code: "UK", label: "United Kingdom", dial: "+44", trunkPrefix: "0" },
-  { code: "US", label: "United States", dial: "+1" },
-  { code: "VN", label: "Vietnam", dial: "+84", trunkPrefix: "0" },
-];
-
-const COUNTRY_PLACEHOLDER: Record<string, string> = {
-  AT: "+43 660 1234567",
-  BE: "+32 470 123456",
-  BN: "+673 8123456",
-  DE: "+49 1512 3456789",
-  DK: "+45 20123456",
-  ES: "+34 612 345 678",
-  FI: "+358 40 1234567",
-  FR: "+33 6 12 34 56 78",
-  ID: "+62 812 3456 7890",
-  IE: "+353 87 123 4567",
-  IT: "+39 320 123 4567",
-  MY: "+60 12 345 6789",
-  NL: "+31 6 12345678",
-  NO: "+47 412 34 567",
-  PH: "+63 917 123 4567",
-  PT: "+351 912 345 678",
-  SG: "+65 8123 4567",
-  SE: "+46 70 123 45 67",
-  CH: "+41 79 123 45 67",
-  TH: "+66 81 234 5678",
-  AE: "+971 50 123 4567",
-  UK: "+44 7700 900123",
-  US: "+1 202 555 0123",
-  VN: "+84 912 345 678",
-};
-
 export default function RegisterPage({ params }: { params: Promise<{ token: string }> }) {
   const [token, setToken] = useState("");
   const [pkg, setPkg] = useState<{ package_name: string; duration_days: number } | null>(null);
@@ -70,12 +9,10 @@ export default function RegisterPage({ params }: { params: Promise<{ token: stri
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [countryCode, setCountryCode] = useState("MY");
   const [result, setResult] = useState<{ access_key: string; expired_at: string } | null>(null);
   const [theme, setTheme] = useState<"dark" | "light">("light");
   const [designVariant, setDesignVariant] = useState<"tactical" | "executive">("executive");
   const [showKeyReminder, setShowKeyReminder] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const validateName = (value: string) => {
     const trimmed = value.trim().replace(/\s+/g, " ");
@@ -101,33 +38,22 @@ export default function RegisterPage({ params }: { params: Promise<{ token: stri
     return "";
   };
 
-  const normalizePhone = (rawPhone: string, selectedCountryCode: string) => {
-    const country = COUNTRY_OPTIONS.find((c) => c.code === selectedCountryCode) ?? COUNTRY_OPTIONS[0];
-    let digits = rawPhone.replace(/[^\d+]/g, "").trim();
-    if (digits.startsWith("+")) return digits;
-    digits = digits.replace(/\D/g, "");
-    if (country.trunkPrefix && digits.startsWith(country.trunkPrefix)) {
-      digits = digits.slice(country.trunkPrefix.length);
-    }
-    return `${country.dial}${digits}`;
-  };
-
   useEffect(() => {
-    const saved = typeof window !== "undefined" ? window.localStorage.getItem("SHINOBI INDI-register-theme") : null;
+    const saved = typeof window !== "undefined" ? window.localStorage.getItem("sarjan-register-theme") : null;
     if (saved === "dark" || saved === "light") setTheme(saved);
   }, []);
 
   useEffect(() => {
-    if (typeof window !== "undefined") window.localStorage.setItem("SHINOBI INDI-register-theme", theme);
+    if (typeof window !== "undefined") window.localStorage.setItem("sarjan-register-theme", theme);
   }, [theme]);
 
   useEffect(() => {
-    const saved = typeof window !== "undefined" ? window.localStorage.getItem("SHINOBI INDI-register-design") : null;
+    const saved = typeof window !== "undefined" ? window.localStorage.getItem("sarjan-register-design") : null;
     if (saved === "tactical" || saved === "executive") setDesignVariant(saved);
   }, []);
 
   useEffect(() => {
-    if (typeof window !== "undefined") window.localStorage.setItem("SHINOBI INDI-register-design", designVariant);
+    if (typeof window !== "undefined") window.localStorage.setItem("sarjan-register-design", designVariant);
   }, [designVariant]);
 
   useEffect(() => {
@@ -146,7 +72,6 @@ export default function RegisterPage({ params }: { params: Promise<{ token: stri
   }, [params]);
 
   const submit = async () => {
-    if (isSubmitting) return;
     const nameError = validateName(name);
     const emailError = validateEmail(email);
     const phoneError = validatePhone(phone);
@@ -155,25 +80,19 @@ export default function RegisterPage({ params }: { params: Promise<{ token: stri
       return;
     }
 
-    try {
-      setIsSubmitting(true);
-      const normalizedPhone = normalizePhone(phone, countryCode);
-      const res = await fetch(`/api/register/${token}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: name.trim().replace(/\s+/g, " "), email: email.trim().toLowerCase(), phone: normalizedPhone }),
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        setStatus(json.error ?? "Registration failed");
-        return;
-      }
-      setResult({ access_key: json.access_key, expired_at: json.expired_at });
-      setStatus("");
-      setShowKeyReminder(true);
-    } finally {
-      setIsSubmitting(false);
+    const res = await fetch(`/api/register/${token}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: name.trim().replace(/\s+/g, " "), email: email.trim().toLowerCase(), phone: phone.trim() }),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      setStatus(json.error ?? "Registration failed");
+      return;
     }
+    setResult({ access_key: json.access_key, expired_at: json.expired_at });
+    setStatus("");
+    setShowKeyReminder(true);
   };
 
   const copyKey = async () => {
@@ -185,7 +104,7 @@ export default function RegisterPage({ params }: { params: Promise<{ token: stri
   const downloadKeyTxt = () => {
     if (!result) return;
     const lines = [
-      "SHINOBI INDI SYSTEM - ACCESS KEY",
+      "SARJAN SIGNAL SYSTEM - ACCESS KEY",
       `Access Key: ${result.access_key}`,
       `Expires At: ${new Date(result.expired_at).toLocaleString()}`,
       `Package: ${pkg?.package_name ?? "-"}`,
@@ -195,7 +114,7 @@ export default function RegisterPage({ params }: { params: Promise<{ token: stri
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `SHINOBI INDI-access-key-${result.access_key}.txt`;
+    a.download = `sarjan-access-key-${result.access_key}.txt`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -205,7 +124,6 @@ export default function RegisterPage({ params }: { params: Promise<{ token: stri
 
   const isDark = theme === "dark";
   const canSubmit = Boolean(name.trim() && email.trim() && phone.trim());
-  const phonePlaceholder = `Phone (e.g. ${COUNTRY_PLACEHOLDER[countryCode] ?? `${(COUNTRY_OPTIONS.find((c) => c.code === countryCode)?.dial ?? "+")} ...`})`;
 
   return (
     <main className={`design-executive grid min-h-screen place-items-center p-6 ${isDark ? "bg-slate-950 text-slate-100" : "light-theme bg-[#e2e8f0] text-[#0f172a]"}`}>
@@ -224,7 +142,7 @@ export default function RegisterPage({ params }: { params: Promise<{ token: stri
             {isDark ? "Light" : "Dark"}
           </button>
         </div>
-        <h1 className={`text-2xl font-bold ${isDark ? "text-slate-100" : "text-slate-900"}`}>SHINOBI INDI Registration</h1>
+        <h1 className={`text-2xl font-bold ${isDark ? "text-slate-100" : "text-slate-900"}`}>SARJAN Registration</h1>
         <p className={`mt-1 text-sm ${isDark ? "text-slate-400" : "text-slate-600"}`}>Complete your details to receive access key instantly.</p>
 
         {status && <p className={`mt-4 rounded px-3 py-2 text-sm ${status.includes("copied") || status.includes("Loading") || status === "" ? (isDark ? "bg-sky-500/10 text-sky-300" : "bg-sky-100 text-sky-700") : (isDark ? "bg-rose-500/10 text-rose-300" : "bg-rose-100 text-rose-700")}`}>{status}</p>}
@@ -236,7 +154,7 @@ export default function RegisterPage({ params }: { params: Promise<{ token: stri
               required
               autoComplete="name"
               className={`w-full rounded border px-3 py-2 ${isDark ? "border-slate-600 bg-slate-950 text-slate-100" : "border-slate-400 bg-white text-slate-900"}`}
-              placeholder="Name (e.g. John Smith)"
+              placeholder="Name (e.g. Ali Ahmad)"
               value={name}
               onChange={(e) => setName(e.target.value)}
             />
@@ -249,35 +167,21 @@ export default function RegisterPage({ params }: { params: Promise<{ token: stri
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
-            <div className="grid grid-cols-3 gap-2">
-              <select
-                value={countryCode}
-                onChange={(e) => setCountryCode(e.target.value)}
-                className={`col-span-1 rounded border px-3 py-2 ${isDark ? "border-slate-600 bg-slate-950 text-slate-100" : "border-slate-400 bg-white text-slate-900"}`}
-              >
-                {COUNTRY_OPTIONS.map((c) => (
-                  <option key={c.code} value={c.code}>
-                    {c.label} ({c.dial})
-                  </option>
-                ))}
-              </select>
-              <input
-                required
-                type="tel"
-                autoComplete="tel"
-                inputMode="tel"
-                className={`col-span-2 w-full rounded border px-3 py-2 ${isDark ? "border-slate-600 bg-slate-950 text-slate-100" : "border-slate-400 bg-white text-slate-900"}`}
-                placeholder={phonePlaceholder}
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-              />
-            </div>
+            <input
+              required
+              type="tel"
+              autoComplete="tel"
+              className={`w-full rounded border px-3 py-2 ${isDark ? "border-slate-600 bg-slate-950 text-slate-100" : "border-slate-400 bg-white text-slate-900"}`}
+              placeholder="Phone (e.g. 60123456789)"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+            />
             <button
               onClick={() => void submit()}
-              disabled={!canSubmit || isSubmitting}
+              disabled={!canSubmit}
               className={`w-full rounded py-2 font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${isDark ? "bg-blue-600 text-white hover:bg-blue-500" : "bg-blue-700 text-white hover:bg-blue-600"}`}
             >
-              {isSubmitting ? "Processing..." : "Submit & Get Access Key"}
+              Submit & Get Access Key
             </button>
           </div>
         )}

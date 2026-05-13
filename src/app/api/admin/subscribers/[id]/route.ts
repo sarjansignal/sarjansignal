@@ -14,15 +14,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (!admin) return NextResponse.json({ error: "Missing admin env" }, { status: 500 });
 
   const { id } = await params;
-  const body = (await req.json()) as {
-    name?: string;
-    email?: string;
-    phone?: string | null;
-    package_name?: string;
-    status?: string;
-    introducer?: string | null;
-    key_expired_at?: string | null;
-  };
+  const body = (await req.json()) as { name?: string; email?: string; phone?: string | null; package_name?: string; status?: string; introducer?: string | null };
 
   const patch: { name?: string; email?: string; phone?: string | null; package_name?: string; status?: string; introducer?: string | null } = {};
   if (body.name !== undefined) patch.name = body.name.trim();
@@ -36,7 +28,6 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   const keyLabel = `${data.name} | ${data.package_name}`;
-  const manualExpiry = body.key_expired_at === undefined ? undefined : (body.key_expired_at ? new Date(body.key_expired_at).toISOString() : null);
 
   if (body.status === "inactive") {
     const { error: keyError } = await admin
@@ -45,7 +36,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         label: keyLabel,
         is_active: false,
         session_token: null,
-        expired_at: manualExpiry === undefined ? new Date().toISOString() : manualExpiry,
+        expired_at: new Date().toISOString(),
       })
       .eq("subscriber_id", id);
     if (keyError) return NextResponse.json({ error: keyError.message }, { status: 500 });
@@ -60,9 +51,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
     let nextExpiry = keyRow?.expired_at ?? null;
     const packageDays = parsePackageDays(data.package_name);
-    if (manualExpiry !== undefined) {
-      nextExpiry = manualExpiry;
-    } else if (packageDays > 0) {
+    if (packageDays > 0) {
       const nowMs = Date.now();
       const baseMs = nextExpiry ? new Date(nextExpiry).getTime() : 0;
       if (!baseMs || baseMs <= nowMs) {
@@ -82,9 +71,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   }
 
   if (body.status === undefined) {
-    const keyPatch: { label: string; expired_at?: string | null } = { label: keyLabel };
-    if (manualExpiry !== undefined) keyPatch.expired_at = manualExpiry;
-    const { error: keyError } = await admin.from("access_keys").update(keyPatch).eq("subscriber_id", id);
+    const { error: keyError } = await admin.from("access_keys").update({ label: keyLabel }).eq("subscriber_id", id);
     if (keyError) return NextResponse.json({ error: keyError.message }, { status: 500 });
   }
 

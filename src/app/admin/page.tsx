@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type Subscriber = {
   id: string;
@@ -108,13 +108,10 @@ export default function AdminPage() {
     introducer: "",
     package_name: "Package 7D",
     status: "active",
-    key_expired_at: "",
   });
   const [editDraft, setEditDraft] = useState<Record<string, { outcome: PerfLog["outcome"]; net_pips: string; peak_pips: string; note: string }>>({});
   const [selectedPerfIds, setSelectedPerfIds] = useState<string[]>([]);
   const [newLink, setNewLink] = useState({ package_name: "Package 7D", duration_days: "7", agent_name: "" });
-  const [editingLinkId, setEditingLinkId] = useState<string | null>(null);
-  const [editLinkDraft, setEditLinkDraft] = useState({ token: "", agent_name: "" });
   const [origin, setOrigin] = useState("");
   const [perfRange, setPerfRange] = useState<"day" | "week" | "month" | "custom">("week");
   const [perfMode, setPerfMode] = useState<"all" | "scalping" | "intraday">("all");
@@ -124,12 +121,10 @@ export default function AdminPage() {
   const [subPage, setSubPage] = useState(1);
   const [perfRowsPerPage, setPerfRowsPerPage] = useState<number | "all">(10);
   const [perfPage, setPerfPage] = useState(1);
-  const [importingPerfCsv, setImportingPerfCsv] = useState(false);
-  const perfCsvInputRef = useRef<HTMLInputElement | null>(null);
 
   const headers = useMemo(() => ({ "x-admin-key": adminKey }), [adminKey]);
 
-  const loadAll = useCallback(async () => {
+  const loadAll = async () => {
     try {
       setStatus("Syncing admin data...");
       const [sRes, pRes, lRes, hRes] = await Promise.all([
@@ -162,12 +157,12 @@ export default function AdminPage() {
       const message = error instanceof Error ? error.message : "Failed syncing admin data.";
       setStatus(message);
     }
-  }, [headers]);
+  };
 
   useEffect(() => {
     if (!authorized || !adminKey) return;
     void loadAll();
-  }, [authorized, adminKey, loadAll]);
+  }, [authorized, adminKey]);
 
   useEffect(() => {
     if (typeof window !== "undefined") setOrigin(window.location.origin);
@@ -309,12 +304,6 @@ export default function AdminPage() {
   };
 
   const startEditSubscriber = (s: Subscriber) => {
-    const toLocalDatetimeInput = (value: string | null) => {
-      if (!value) return "";
-      const d = new Date(value);
-      const shifted = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
-      return shifted.toISOString().slice(0, 16);
-    };
     setEditingSubId(s.id);
     setEditSubDraft({
       name: s.name,
@@ -323,7 +312,6 @@ export default function AdminPage() {
       introducer: s.introducer ?? "",
       package_name: s.package_name,
       status: s.status,
-      key_expired_at: toLocalDatetimeInput(s.key_expired_at),
     });
   };
 
@@ -338,7 +326,6 @@ export default function AdminPage() {
         introducer: editSubDraft.introducer || null,
         package_name: editSubDraft.package_name,
         status: editSubDraft.status,
-        key_expired_at: editSubDraft.key_expired_at ? new Date(editSubDraft.key_expired_at).toISOString() : null,
       }),
     });
     const json = await res.json();
@@ -477,38 +464,6 @@ export default function AdminPage() {
     await loadAll();
   };
 
-  const startEditLink = (link: PackageLink) => {
-    setEditingLinkId(link.id);
-    setEditLinkDraft({
-      token: link.token,
-      agent_name: link.agent_name ?? "",
-    });
-  };
-
-  const cancelEditLink = () => {
-    setEditingLinkId(null);
-    setEditLinkDraft({ token: "", agent_name: "" });
-  };
-
-  const saveLinkEdit = async (id: string) => {
-    const res = await fetch(`/api/admin/package-links/${id}`, {
-      method: "PATCH",
-      headers: { ...headers, "content-type": "application/json" },
-      body: JSON.stringify({
-        token: editLinkDraft.token,
-        agent_name: editLinkDraft.agent_name || null,
-      }),
-    });
-    const json = await res.json();
-    if (!res.ok) {
-      setStatus(json.error ?? "Failed updating package link.");
-      return;
-    }
-    setStatus("Package link updated.");
-    cancelEditLink();
-    await loadAll();
-  };
-
   const deleteLink = async (id: string) => {
     const ok = window.confirm("Delete this package link?");
     if (!ok) return;
@@ -549,7 +504,7 @@ export default function AdminPage() {
     const a = document.createElement("a");
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
     a.href = url;
-    a.download = `SHINOBI INDI-performance-${perfMode}-${perfRange}-${stamp}.csv`;
+    a.download = `sarjan-performance-${perfMode}-${perfRange}-${stamp}.csv`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -557,43 +512,11 @@ export default function AdminPage() {
     setStatus(`Exported ${rows.length} performance rows.`);
   };
 
-  const logoutAdmin = () => {
-    setAuthorized(false);
-    setAdminKey("");
-    setStatus("Logged out.");
-  };
-
-  const importPerfCsv = async (file: File) => {
-    if (!file) return;
-    setImportingPerfCsv(true);
-    try {
-      const csv = await file.text();
-      const res = await fetch("/api/admin/performance-logs", {
-        method: "POST",
-        headers: { ...headers, "content-type": "application/json" },
-        body: JSON.stringify({ csv }),
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        setStatus(json.error ?? "Failed importing performance CSV.");
-        return;
-      }
-      setStatus(`Import done. Updated: ${json.updated ?? 0}, Inserted: ${json.inserted ?? 0}, Skipped: ${json.skipped ?? 0}.`);
-      await loadAll();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed importing performance CSV.";
-      setStatus(message);
-    } finally {
-      setImportingPerfCsv(false);
-      if (perfCsvInputRef.current) perfCsvInputRef.current.value = "";
-    }
-  };
-
   if (!authorized) {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-100 p-6">
         <div className="mx-auto max-w-md rounded-xl border border-slate-700 bg-slate-900/70 p-5">
-          <h1 className="text-xl font-bold">SHINOBI INDI Admin CRM</h1>
+          <h1 className="text-xl font-bold">SARJAN Admin CRM</h1>
           <p className="mt-1 text-sm text-slate-400">Enter admin key</p>
           <input value={adminKey} onChange={(e) => setAdminKey(e.target.value)} className="mt-4 w-full rounded border border-slate-600 bg-slate-950 px-3 py-2" />
           <button onClick={() => void loadAll()} className="mt-3 w-full rounded bg-blue-600 py-2 font-semibold">Unlock</button>
@@ -608,21 +531,12 @@ export default function AdminPage() {
       <div className="mx-auto max-w-7xl space-y-4">
         <header className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <h1 className="text-2xl font-bold tracking-tight">SHINOBI INDI Admin CRM</h1>
+            <h1 className="text-2xl font-bold tracking-tight">SARJAN Admin CRM</h1>
             <div className="flex flex-wrap gap-2">
-              <a
-                href="/access"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="rounded-lg bg-indigo-700 px-3 py-2 text-sm font-semibold hover:bg-indigo-600"
-              >
-                Signal
-              </a>
               <button onClick={() => setTab("subs")} className={`rounded-lg px-3 py-2 text-sm font-semibold ${tab === "subs" ? "bg-blue-600" : "bg-slate-800 hover:bg-slate-700"}`}>Subscribers</button>
               <button onClick={() => setTab("perf")} className={`rounded-lg px-3 py-2 text-sm font-semibold ${tab === "perf" ? "bg-blue-600" : "bg-slate-800 hover:bg-slate-700"}`}>Performance Logs</button>
               <button onClick={() => setTab("links")} className={`rounded-lg px-3 py-2 text-sm font-semibold ${tab === "links" ? "bg-blue-600" : "bg-slate-800 hover:bg-slate-700"}`}>Package Links</button>
               <button onClick={() => void loadAll()} className="rounded-lg bg-slate-800 px-3 py-2 text-sm font-semibold hover:bg-slate-700">Refresh</button>
-              <button onClick={logoutAdmin} className="rounded-lg bg-rose-700 px-3 py-2 text-sm font-semibold hover:bg-rose-600">Log Out</button>
             </div>
           </div>
         </header>
@@ -766,18 +680,7 @@ export default function AdminPage() {
                       </td>
                       <td className="px-3 py-2 font-mono text-xs">{s.access_key ?? "-"}</td>
                       <td className="px-3 py-2 text-xs">{formatAdminDate(s.last_login_at)}</td>
-                      <td className="px-3 py-2 text-xs">
-                        {editingSubId === s.id ? (
-                          <input
-                            type="datetime-local"
-                            value={editSubDraft.key_expired_at}
-                            onChange={(e) => setEditSubDraft((d) => ({ ...d, key_expired_at: e.target.value }))}
-                            className="w-44 rounded border border-slate-600 bg-slate-950 px-2 py-1"
-                          />
-                        ) : (
-                          formatAdminDate(s.key_expired_at)
-                        )}
-                      </td>
+                      <td className="px-3 py-2 text-xs">{formatAdminDate(s.key_expired_at)}</td>
                       <td className="px-3 py-2">
                         {editingSubId === s.id ? (
                           <div className="flex gap-1">
@@ -893,23 +796,6 @@ export default function AdminPage() {
                     >
                       Export CSV
                     </button>
-                    <button
-                      onClick={() => perfCsvInputRef.current?.click()}
-                      disabled={importingPerfCsv}
-                      className="rounded border border-blue-500 bg-blue-700 px-3 py-2 text-xs font-semibold hover:bg-blue-600 disabled:opacity-40"
-                    >
-                      {importingPerfCsv ? "Importing..." : "Import CSV"}
-                    </button>
-                    <input
-                      ref={perfCsvInputRef}
-                      type="file"
-                      accept=".csv,text/csv"
-                      className="hidden"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) void importPerfCsv(file);
-                      }}
-                    />
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
@@ -1027,7 +913,6 @@ export default function AdminPage() {
                   <tr>
                     <th className="px-3 py-2">Package</th>
                     <th className="px-3 py-2">Days</th>
-                    <th className="px-3 py-2">Token</th>
                     <th className="px-3 py-2">Agent</th>
                     <th className="px-3 py-2">Status</th>
                     <th className="px-3 py-2">Clicks</th>
@@ -1041,28 +926,7 @@ export default function AdminPage() {
                     <tr key={l.id} className="border-t border-slate-800">
                       <td className="px-3 py-2">{l.package_name}</td>
                       <td className="px-3 py-2">{l.duration_days}</td>
-                      <td className="px-3 py-2 font-mono text-xs">
-                        {editingLinkId === l.id ? (
-                          <input
-                            value={editLinkDraft.token}
-                            onChange={(e) => setEditLinkDraft((s) => ({ ...s, token: e.target.value }))}
-                            className="w-40 rounded border border-slate-600 bg-slate-950 px-2 py-1"
-                          />
-                        ) : (
-                          l.token
-                        )}
-                      </td>
-                      <td className="px-3 py-2">
-                        {editingLinkId === l.id ? (
-                          <input
-                            value={editLinkDraft.agent_name}
-                            onChange={(e) => setEditLinkDraft((s) => ({ ...s, agent_name: e.target.value }))}
-                            className="w-36 rounded border border-slate-600 bg-slate-950 px-2 py-1"
-                          />
-                        ) : (
-                          l.agent_name ?? "-"
-                        )}
-                      </td>
+                      <td className="px-3 py-2">{l.agent_name ?? "-"}</td>
                       <td className="px-3 py-2">
                         <span className={`rounded-full px-2 py-1 text-xs font-semibold ${l.is_active ? "bg-emerald-500/20 text-emerald-300" : "bg-rose-500/20 text-rose-300"}`}>
                           {l.is_active ? "active" : "inactive"}
@@ -1075,21 +939,11 @@ export default function AdminPage() {
                       </td>
                       <td className="px-3 py-2">
                         <div className="flex gap-1">
-                          {editingLinkId === l.id ? (
-                            <>
-                              <button onClick={() => void saveLinkEdit(l.id)} className="rounded-lg bg-emerald-600 px-2 py-1 text-xs font-semibold hover:bg-emerald-500">Save</button>
-                              <button onClick={cancelEditLink} className="rounded-lg bg-slate-700 px-2 py-1 text-xs font-semibold hover:bg-slate-600">Cancel</button>
-                            </>
-                          ) : (
-                            <>
-                              <button onClick={() => void copyLink(l.token)} className="rounded-lg bg-slate-700 px-2 py-1 text-xs font-semibold hover:bg-slate-600">Copy</button>
-                              <button onClick={() => startEditLink(l)} className="rounded-lg bg-blue-600 px-2 py-1 text-xs font-semibold hover:bg-blue-500">Edit</button>
-                              <button onClick={() => void toggleLink(l.id, l.is_active)} className={`rounded-lg px-2 py-1 text-xs font-semibold ${l.is_active ? "bg-rose-600 hover:bg-rose-500" : "bg-emerald-600 hover:bg-emerald-500"}`}>
-                                {l.is_active ? "Disable" : "Enable"}
-                              </button>
-                              <button onClick={() => void deleteLink(l.id)} className="rounded-lg bg-rose-900 px-2 py-1 text-xs font-semibold hover:bg-rose-800">Delete</button>
-                            </>
-                          )}
+                          <button onClick={() => void copyLink(l.token)} className="rounded-lg bg-slate-700 px-2 py-1 text-xs font-semibold hover:bg-slate-600">Copy</button>
+                          <button onClick={() => void toggleLink(l.id, l.is_active)} className={`rounded-lg px-2 py-1 text-xs font-semibold ${l.is_active ? "bg-rose-600 hover:bg-rose-500" : "bg-emerald-600 hover:bg-emerald-500"}`}>
+                            {l.is_active ? "Disable" : "Enable"}
+                          </button>
+                          <button onClick={() => void deleteLink(l.id)} className="rounded-lg bg-rose-900 px-2 py-1 text-xs font-semibold hover:bg-rose-800">Delete</button>
                         </div>
                       </td>
                     </tr>

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Cinzel, JetBrains_Mono, Montserrat, Plus_Jakarta_Sans } from "next/font/google";
+import { JetBrains_Mono, Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
 
 const jetbrainsMono = JetBrains_Mono({
@@ -12,47 +12,13 @@ const plusJakartaSans = Plus_Jakarta_Sans({
   subsets: ["latin"],
 });
 
-const cinzel = Cinzel({
-  variable: "--font-cinzel",
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700", "800", "900"],
-});
-
-const montserrat = Montserrat({
-  variable: "--font-montserrat",
-  subsets: ["latin"],
-});
-
 export const metadata: Metadata = {
-  title: "SHINOBI INDI",
-  description: "Discipline. Precision. Profit.",
-  metadataBase: new URL("https://shinobiindi.ezos.my"),
+  title: "SARJAN SIGNAL",
+  description: "Trading Disiplin, Arahan Sarjan.",
   icons: {
-    icon: "/shinobi-logo-small-size.png",
-    shortcut: "/shinobi-logo-small-size.png",
-    apple: "/shinobi-logo-small-size.png",
-  },
-  openGraph: {
-    title: "SHINOBI INDI",
-    description: "Discipline. Precision. Profit.",
-    url: "https://shinobiindi.ezos.my",
-    siteName: "SHINOBI INDI",
-    images: [
-      {
-        url: "/opengraph-image.png",
-        width: 1200,
-        height: 630,
-        alt: "SHINOBI INDI | Discipline. Precision. Profit.",
-      },
-    ],
-    locale: "en_US",
-    type: "website",
-  },
-  twitter: {
-    card: "summary_large_image",
-    title: "SHINOBI INDI",
-    description: "Discipline. Precision. Profit.",
-    images: ["/opengraph-image.png"],
+    icon: "/sarjan-logo.png",
+    shortcut: "/sarjan-logo.png",
+    apple: "/sarjan-logo.png",
   },
 };
 
@@ -62,7 +28,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${jetbrainsMono.variable} ${plusJakartaSans.variable} ${cinzel.variable} ${montserrat.variable} h-full antialiased`}>
+    <html lang="en" className={`${jetbrainsMono.variable} ${plusJakartaSans.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );
