@@ -1,6 +1,6 @@
-# SARJAN SIGNAL SYSTEM (Tactical Command Version)
+# SHINOBI INDI SYSTEM (Tactical Command Version)
 
-Trading Disiplin, Arahan Sarjan.
+Trading Disiplin, Arahan Shinobi Indi.
 
 ## Stack
 - Next.js (App Router + TypeScript)

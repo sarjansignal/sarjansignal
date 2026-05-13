@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, BarChart3, CalendarClock, Clipboard, Moon, Package, ShieldCheck, Signal, Sun, Timer, User } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
+import { AlertTriangle, BarChart3, CalendarClock, Clipboard, Eye, EyeOff, Moon, Package, ShieldCheck, Signal, Sun, Timer, User } from "lucide-react";
 import { getSupabaseClient } from "@/lib/supabase";
 import type { AccessKey, PerformanceLog, Signal as TradingSignal, SignalMode } from "@/lib/types";
 
@@ -23,6 +24,7 @@ const SCALPING_INTERVAL_SECONDS = 30 * 60;
 const INTRADAY_INTERVAL_SECONDS = 4 * 60 * 60;
 const GOLD_PIPS_MULTIPLIER = 10;
 const PERFORMANCE_DEFAULT_PAGE_SIZE = 10;
+const ACCESS_KEY_STORAGE_KEY = "SHINOBI-access-key";
 
 function fmt(value: number) {
   return value.toFixed(2);
@@ -71,6 +73,7 @@ export default function Home() {
   const [accessKey, setAccessKey] = useState("");
   const [authError, setAuthError] = useState<string | null>(null);
   const [loadingAuth, setLoadingAuth] = useState(false);
+  const [showAccessKey, setShowAccessKey] = useState(false);
 
   const [tab, setTab] = useState<Tab>("signal");
   const [mode, setMode] = useState<SignalMode>("scalping");
@@ -79,7 +82,7 @@ export default function Home() {
   const [riskAmount, setRiskAmount] = useState("100");
   const [sessionSeconds, setSessionSeconds] = useState(SESSION_MINUTES * 60);
   const [nowMs, setNowMs] = useState(Date.now());
-  const [theme, setTheme] = useState<"dark" | "light">("light");
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastSync, setLastSync] = useState<string | null>(null);
   const [activeAccessKeyId, setActiveAccessKeyId] = useState<string | null>(null);
@@ -102,15 +105,15 @@ export default function Home() {
   const lastSeenSignalIdRef = useRef<string | null>(null);
   const lastSeenPerfIdRef = useRef<string | null>(null);
 
-  const pushLiveAlert = (alert: LiveAlert) => {
+  const pushLiveAlert = useCallback((alert: LiveAlert) => {
     setLiveAlerts((prev) => [alert, ...prev].slice(0, 20));
     setActiveSignalPopup(alert);
     if (typeof window !== "undefined" && notificationPermission === "granted") {
       new Notification(alert.title, { body: alert.message });
     }
-  };
+  }, [notificationPermission]);
 
-  const fetchDashboardData = async (sb: NonNullable<ReturnType<typeof getSupabaseClient>>) => {
+  const fetchDashboardData = useCallback(async (sb: NonNullable<ReturnType<typeof getSupabaseClient>>) => {
     const [signalRes, serverLogRes] = await Promise.all([
       sb.from("signals").select("*").eq("pair", "XAUUSD").order("created_at", { ascending: false }).limit(50),
       fetch("/api/performance-logs?limit=300", { cache: "no-store" }),
@@ -126,24 +129,40 @@ export default function Home() {
       // keep existing logs when server fetch fails
     }
     setLastSync(new Date().toLocaleTimeString());
-  };
+  }, []);
 
   useEffect(() => {
-    const saved = typeof window !== "undefined" ? window.localStorage.getItem("sarjan-theme") : null;
+    const saved = typeof window !== "undefined" ? window.localStorage.getItem("shinobi-indi-theme") : null;
     if (saved === "dark" || saved === "light") setTheme(saved);
   }, []);
 
   useEffect(() => {
-    if (typeof window !== "undefined") window.localStorage.setItem("sarjan-theme", theme);
+    if (typeof window !== "undefined") window.localStorage.setItem("shinobi-indi-theme", theme);
   }, [theme]);
 
   useEffect(() => {
-    const saved = typeof window !== "undefined" ? window.localStorage.getItem("sarjan-design") : null;
+    if (typeof window === "undefined") return;
+    const savedAccessKey = window.localStorage.getItem(ACCESS_KEY_STORAGE_KEY);
+    if (savedAccessKey) setAccessKey(savedAccessKey);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const trimmed = accessKey.trim();
+    if (!trimmed) {
+      window.localStorage.removeItem(ACCESS_KEY_STORAGE_KEY);
+      return;
+    }
+    window.localStorage.setItem(ACCESS_KEY_STORAGE_KEY, trimmed);
+  }, [accessKey]);
+
+  useEffect(() => {
+    const saved = typeof window !== "undefined" ? window.localStorage.getItem("shinobi-indi-design") : null;
     if (saved === "tactical" || saved === "executive") setDesignVariant(saved);
   }, []);
 
   useEffect(() => {
-    if (typeof window !== "undefined") window.localStorage.setItem("sarjan-design", designVariant);
+    if (typeof window !== "undefined") window.localStorage.setItem("shinobi-indi-design", designVariant);
   }, [designVariant]);
 
   useEffect(() => {
@@ -208,7 +227,7 @@ export default function Home() {
     } else if (latestPerf) {
       lastSeenPerfIdRef.current = latestPerf.id;
     }
-  }, [authorized, signals, logs]);
+  }, [authorized, signals, logs, pushLiveAlert]);
 
   useEffect(() => {
     if (!authorized || !supabase) return;
@@ -280,7 +299,7 @@ export default function Home() {
     };
 
     const channel = sb
-      .channel("sarjan-stream")
+      .channel("shinobi-indi-stream")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "signals" }, (payload) =>
         handleSignalEvent(payload as unknown as { eventType: "INSERT" | "UPDATE" | "DELETE"; new: Record<string, unknown> }),
       )
@@ -298,7 +317,7 @@ export default function Home() {
     return () => {
       void sb.removeChannel(channel);
     };
-  }, [authorized, supabase]);
+  }, [authorized, supabase, fetchDashboardData, pushLiveAlert]);
 
   useEffect(() => {
     if (!authorized || !supabase) return;
@@ -307,7 +326,7 @@ export default function Home() {
       void fetchDashboardData(sb);
     }, 15000);
     return () => clearInterval(timer);
-  }, [authorized, supabase]);
+  }, [authorized, supabase, fetchDashboardData]);
 
   useEffect(() => {
     if (!authorized || !supabase || !activeAccessKeyId || !activeSessionToken) return;
@@ -585,6 +604,13 @@ export default function Home() {
     setActiveSignalPopup(null);
   };
 
+  const clearSavedAccessKey = () => {
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(ACCESS_KEY_STORAGE_KEY);
+    }
+    setAccessKey("");
+  };
+
   const refreshNow = async () => {
     if (!supabase || isRefreshing) return;
     setIsRefreshing(true);
@@ -599,18 +625,18 @@ export default function Home() {
     const loginDark = theme === "dark";
     return (
       <main className={`grid min-h-screen place-items-center px-4 ${loginDark ? "" : "light-theme bg-[#e2e8f0] text-[#0f172a]"} ${designVariant === "executive" ? "design-executive" : ""}`}>
-        <section className={`scanlines w-full max-w-md rounded-xl p-6 ${loginDark ? "border border-emerald-500/50 bg-black/80 shadow-[0_0_40px_rgba(16,185,129,0.2)]" : "border border-[#0f172a]/20 bg-[#f8fafc] shadow-[0_10px_30px_rgba(15,23,42,0.14)]"}`}>
+        <section className={`scanlines relative w-full max-w-md rounded-2xl p-6 ${loginDark ? "border border-[#d4af37]/35 bg-[#0c0a12]/88 shadow-[0_0_46px_rgba(212,175,55,0.15)]" : "border border-[#0f172a]/20 bg-[#f8fafc] shadow-[0_10px_30px_rgba(15,23,42,0.14)]"}`}>
+          <div className="mb-4 flex justify-center">
+            <Image
+              src="/shinobi-logo.png"
+              alt="SHINOBI INDI Signal"
+              width={396}
+              height={396}
+              className="h-72 w-72 object-contain drop-shadow-[0_0_18px_rgba(212,175,55,0.25)]"
+              priority
+            />
+          </div>
           <div className="mb-3 flex justify-end gap-2">
-            <button
-              onClick={() => setDesignVariant((prev) => (prev === "tactical" ? "executive" : "tactical"))}
-              className={`inline-flex items-center gap-1 rounded border px-3 py-1.5 text-[10px] font-bold ${
-                designVariant === "executive"
-                  ? "exec-head-btn"
-                  : "border-emerald-400/40 text-emerald-300 hover:bg-emerald-500/20"
-              }`}
-            >
-              {designVariant === "tactical" ? "Executive" : "Tactical"}
-            </button>
             <button
               onClick={() => setTheme((prev) => (prev === "dark" ? "light" : "dark"))}
               className={`inline-flex items-center gap-1 rounded border px-3 py-1.5 text-[10px] font-bold ${
@@ -624,31 +650,51 @@ export default function Home() {
             </button>
           </div>
           <h1
-            className={`${loginDark ? "glitch text-emerald-400" : "text-emerald-700 tracking-[0.03em] drop-shadow-none"} mb-2 text-2xl font-semibold`}
-            data-text={loginDark ? "SARJAN FIREWALL" : undefined}
+            className={`font-luxury-serif mb-2 text-3xl font-semibold leading-[1.02] sm:text-4xl ${loginDark ? "text-[#f8f3df]" : "text-[#0f172a]"}`}
+            style={{ fontFamily: "var(--font-cinzel), Georgia, serif" }}
           >
-            SARJAN FIREWALL
+            SHINOBI INDI
           </h1>
-          <p className={`mb-6 text-sm ${loginDark ? "text-emerald-300/70" : "text-slate-700"}`}>Trading Disiplin, Arahan Sarjan.</p>
-          <label className="mb-2 block text-xs uppercase tracking-[0.25em] text-emerald-300">Authorization Key</label>
-          <input
-            value={accessKey}
-            onChange={(e) => setAccessKey(e.target.value)}
-            className={`w-full rounded border px-3 py-2 outline-none ring-emerald-400/40 focus:ring ${loginDark ? "border-emerald-400/30 bg-black text-emerald-200" : "border-emerald-700/60 bg-white text-[#0f172a]"}`}
-            placeholder="ENTER_KEY"
-          />
+          <label className="mb-2 block text-xs uppercase tracking-[0.25em] text-[#d4af37]">Authorization Key</label>
+          <div className="relative">
+            <input
+              type={showAccessKey ? "text" : "password"}
+              value={accessKey}
+              onChange={(e) => setAccessKey(e.target.value)}
+              className={`w-full rounded border px-3 py-2 pr-11 outline-none ring-emerald-400/40 focus:ring ${loginDark ? "border-emerald-400/30 bg-black text-emerald-200" : "border-emerald-700/60 bg-white text-[#0f172a]"}`}
+              placeholder="ENTER_KEY"
+            />
+            <button
+              type="button"
+              onClick={() => setShowAccessKey((prev) => !prev)}
+              className={`absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 ${loginDark ? "text-[#d4af37] hover:bg-[#d4af37]/10" : "text-slate-600 hover:bg-slate-100"}`}
+              aria-label={showAccessKey ? "Hide access key" : "Show access key"}
+              title={showAccessKey ? "Hide" : "Show"}
+            >
+              {showAccessKey ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
           {authError && <p className="mt-3 flex items-center gap-2 text-sm text-red-400"><AlertTriangle size={14} />{authError}</p>}
           {!supabase && <p className="mt-3 text-xs text-red-400">Supabase environment variables are missing.</p>}
           <button
             onClick={login}
             disabled={loadingAuth || !accessKey.trim()}
             className={`mt-5 w-full rounded border py-2 transition disabled:opacity-50 ${
-              designVariant === "executive"
-                ? "border-blue-500/50 bg-blue-600 text-white hover:bg-blue-500"
-                : "border-emerald-400/70 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"
+              loginDark ? "border-[#d4af37]/45 bg-[#2c1b35] text-[#f6dc8c] hover:bg-[#3a2246]" : "border-[#1e3a8a]/35 bg-[#2563eb] text-white hover:bg-[#1d4ed8]"
             }`}
           >
             {loadingAuth ? "VALIDATING..." : "AUTHORIZE"}
+          </button>
+          <button
+            onClick={clearSavedAccessKey}
+            type="button"
+            className={`mt-2 w-full rounded border py-2 text-xs ${
+              loginDark
+                ? "border-red-400/40 text-red-300 hover:bg-red-500/10"
+                : "border-red-500/40 text-red-700 hover:bg-red-50"
+            }`}
+          >
+            CLEAR SAVED KEY
           </button>
         </section>
       </main>
@@ -661,62 +707,21 @@ export default function Home() {
   return (
     <main className={`min-h-screen px-3 py-4 sm:px-6 ${isDark ? "" : "light-theme bg-[#e2e8f0] text-[#0f172a]"} ${designVariant === "executive" ? "design-executive" : ""}`}>
       <div className={`scanlines mx-auto max-w-6xl rounded-2xl p-3 sm:p-6 ${isDark ? "border border-emerald-500/40 bg-black/80 shadow-[0_0_60px_rgba(16,185,129,0.16)]" : "border border-[#0f172a]/20 bg-[#f8fafc] shadow-[0_10px_30px_rgba(15,23,42,0.14)]"}`}>
-        {isExecutive ? (
+        {isExecutive && (
           <header className="mb-5 border-b border-emerald-400/20 pb-4 text-[11px] uppercase tracking-[0.16em] text-emerald-300 sm:text-xs sm:tracking-[0.2em]">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <p className="exec-top-brand leading-none text-blue-400">SARJAN SIGNAL</p>
-                <p className="exec-top-sub mt-1">TRADING DISIPLIN, ARAHAN SARJAN.</p>
+                <p className="exec-top-brand leading-none text-blue-400">SHINOBI INDI</p>
+                <p className="exec-top-sub mt-1">PROFITABLE DISCIPLINE STARTS HERE</p>
               </div>
               <div className="exec-action-group flex flex-wrap items-center gap-2">
                 <div className="mr-2 text-right">
                   <p className="text-[9px] tracking-[0.14em] text-emerald-300/65">ACCESS STATUS</p>
-                  <p className="text-xs normal-case text-emerald-300">● Authorized</p>
+                  <p className="text-xs normal-case text-emerald-300">Authorized</p>
                 </div>
                 <button onClick={() => setTheme((prev) => (prev === "dark" ? "light" : "dark"))} className="exec-head-btn inline-flex items-center justify-center gap-1 rounded border border-emerald-400/40 px-2 py-1 text-[10px] hover:bg-emerald-500/20">
                   {isDark ? <Sun size={12} /> : <Moon size={12} />}
                   {isDark ? "Light" : "Dark"}
-                </button>
-                <button onClick={() => setDesignVariant((prev) => (prev === "tactical" ? "executive" : "tactical"))} className="exec-head-btn inline-flex items-center justify-center gap-1 rounded border border-emerald-400/40 px-2 py-1 text-[10px] hover:bg-emerald-500/20">
-                  Tactical
-                </button>
-                <button onClick={refreshNow} disabled={isRefreshing} className="exec-head-btn inline-flex items-center justify-center gap-1 rounded border border-emerald-400/40 px-2 py-1 text-[10px] hover:bg-emerald-500/20 disabled:opacity-50">
-                  {isRefreshing ? "Syncing..." : "Refresh"}
-                </button>
-                <button onClick={logout} className="exec-head-btn exec-head-btn-danger inline-flex items-center justify-center gap-1 rounded border border-red-400/40 px-2 py-1 text-[10px] text-red-300 hover:bg-red-500/15">
-                  Log out
-                </button>
-              </div>
-            </div>
-            <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-[10px] tracking-[0.14em] text-emerald-300/80">
-              <span className="inline-flex items-center gap-1"><User size={12} />{accountName}</span>
-              <span className="inline-flex items-center gap-1"><Package size={12} />{accountPackage}</span>
-              <span className="inline-flex items-center gap-1"><CalendarClock size={12} />{formatDateTime(subscriptionExpiry)}</span>
-              <span className="inline-flex items-center gap-1"><Signal size={12} />XAUUSD</span>
-              <span className="inline-flex items-center gap-1"><Timer size={12} />{String(Math.floor(sessionSeconds / 60)).padStart(2, "0")}:{String(sessionSeconds % 60).padStart(2, "0")}</span>
-            </div>
-          </header>
-        ) : (
-          <header className="mb-4 border-b border-emerald-400/20 pb-3 text-[11px] uppercase tracking-[0.16em] text-emerald-300 sm:mb-5 sm:pb-4 sm:text-xs sm:tracking-[0.2em]">
-            <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-              <div className="grid gap-1">
-                <div className="flex items-center gap-2"><ShieldCheck size={14} />System_Status: SECURE</div>
-                <div className="flex items-center gap-2"><User size={14} />Account: {accountName}</div>
-                <div className="flex items-center gap-2"><Package size={14} />Package: {accountPackage}</div>
-                <div className="flex items-center gap-2">
-                  <CalendarClock size={14} />
-                  Subscription Expires: {formatDateTime(subscriptionExpiry)}
-                </div>
-                <div className="flex items-center gap-2"><Signal size={14} />Market: XAUUSD (LIVE)</div>
-                <div className="flex items-center gap-2"><Timer size={14} />Session (App): {String(Math.floor(sessionSeconds / 60)).padStart(2, "0")}:{String(sessionSeconds % 60).padStart(2, "0")}</div>
-              </div>
-              <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center sm:justify-end md:pt-1">
-                <button onClick={() => setTheme((prev) => (prev === "dark" ? "light" : "dark"))} className="inline-flex items-center justify-center gap-1 rounded border border-emerald-400/40 px-2 py-1 text-[10px] hover:bg-emerald-500/20">
-                  {isDark ? <Sun size={12} /> : <Moon size={12} />}
-                  {isDark ? "Light" : "Dark"}
-                </button>
-                <button onClick={() => setDesignVariant((prev) => (prev === "tactical" ? "executive" : "tactical"))} className="inline-flex items-center justify-center gap-1 rounded border border-emerald-400/40 px-2 py-1 text-[10px] hover:bg-emerald-500/20">
-                  {designVariant === "tactical" ? "Executive" : "Tactical"}
                 </button>
                 <button onClick={refreshNow} disabled={isRefreshing} className="inline-flex items-center justify-center gap-1 rounded border border-emerald-400/40 px-2 py-1 text-[10px] hover:bg-emerald-500/20 disabled:opacity-50">
                   {isRefreshing ? "Syncing..." : "Refresh"}
@@ -725,6 +730,14 @@ export default function Home() {
                   Log out
                 </button>
               </div>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-[10px] tracking-[0.14em] text-emerald-300/80">
+              <span className="inline-flex items-center gap-1"><ShieldCheck size={12} />System Secure</span>
+              <span className="inline-flex items-center gap-1"><User size={12} />{accountName}</span>
+              <span className="inline-flex items-center gap-1"><Package size={12} />{accountPackage}</span>
+              <span className="inline-flex items-center gap-1"><CalendarClock size={12} />{formatDateTime(subscriptionExpiry)}</span>
+              <span className="inline-flex items-center gap-1"><Signal size={12} />XAUUSD</span>
+              <span className="inline-flex items-center gap-1"><Timer size={12} />{formatClock(sessionSeconds)}</span>
             </div>
           </header>
         )}

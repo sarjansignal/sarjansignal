@@ -26,6 +26,27 @@ type Incoming = {
 
 const GOLD_PIPS_MULTIPLIER = 10;
 const SIGNAL_DUPLICATE_COOLDOWN_SECONDS = Number(process.env.SIGNAL_DUPLICATE_COOLDOWN_SECONDS ?? "90");
+const BE_REVERSAL_PIPS = Number(process.env.BE_REVERSAL_PIPS ?? "20");
+const SL_MAX_PROGRESS_PIPS = Number(process.env.SL_MAX_PROGRESS_PIPS ?? "10");
+
+async function sendTelegramTradingAlert(lines: string[]) {
+  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+  if (!botToken || !chatId) return;
+  try {
+    await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: lines.join("\n"),
+        parse_mode: "Markdown",
+      }),
+    });
+  } catch {
+    // do not block webhook flow on alert failure
+  }
+}
 
 function asNumber(value: unknown): number | null {
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
@@ -40,6 +61,86 @@ function normalized(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const v = value.trim().toLowerCase();
   return v.length ? v : null;
+}
+
+function inferHitOutcome(args: {
+  type: "buy" | "sell";
+  livePrice: number;
+  sl: number;
+  tp1: number;
+  tp2: number;
+  tp3: number | null;
+}): "tp1" | "tp2" | "tp3" | "sl" | null {
+  const { type, livePrice, sl, tp1, tp2, tp3 } = args;
+  if (type === "buy") {
+    if (livePrice <= sl) return "sl";
+    if (tp3 !== null && livePrice >= tp3) return "tp3";
+    if (livePrice >= tp2) return "tp2";
+    if (livePrice >= tp1) return "tp1";
+    return null;
+  }
+  if (livePrice >= sl) return "sl";
+  if (tp3 !== null && livePrice <= tp3) return "tp3";
+  if (livePrice <= tp2) return "tp2";
+  if (livePrice <= tp1) return "tp1";
+  return null;
+}
+
+function classifyCycleOutcome(args: {
+  type: "buy" | "sell";
+  entryTarget: number;
+  closePrice: number;
+  sl: number;
+  tp1: number;
+  tp2: number;
+  tp3: number | null;
+  peakPips: number;
+}): "tp1" | "tp2" | "tp3" | "be" | "sl" {
+  const immediateHit = inferHitOutcome({
+    type: args.type,
+    livePrice: args.closePrice,
+    sl: args.sl,
+    tp1: args.tp1,
+    tp2: args.tp2,
+    tp3: args.tp3,
+  });
+
+  if (immediateHit === "tp1" || immediateHit === "tp2" || immediateHit === "tp3") {
+    return immediateHit;
+  }
+
+  if (immediateHit === "sl") {
+    // If signal never built >10 pips before SL, keep it as SL.
+    if (args.peakPips <= SL_MAX_PROGRESS_PIPS) return "sl";
+    // If it did build profit but failed to reach 20 pips, classify as BE.
+    if (args.peakPips < BE_REVERSAL_PIPS) return "be";
+    // If it had meaningful run-up and later reversed to SL, treat as BE protection logic.
+    return "be";
+  }
+
+  const realizedPips =
+    args.type === "buy"
+      ? (args.closePrice - args.entryTarget) * GOLD_PIPS_MULTIPLIER
+      : (args.entryTarget - args.closePrice) * GOLD_PIPS_MULTIPLIER;
+
+  // Reversal/non-TP closure before 20 pips peak -> BE
+  if (args.peakPips < BE_REVERSAL_PIPS && realizedPips <= 0) return "be";
+  // Non-TP/non-SL closure after meaningful run but reversed -> BE
+  if (realizedPips <= 0) return "be";
+  // Fallback positive close without explicit TP touch.
+  return "tp1";
+}
+
+function computeStoredNetPips(args: {
+  outcome: "tp1" | "tp2" | "tp3" | "be" | "sl";
+  realizedPips: number;
+  peakPips: number;
+}) {
+  if (args.outcome === "be") {
+    // SHINOBI INDI policy: BE stores 85% of achieved peak run-up.
+    return Number(Math.max(0, args.peakPips * 0.85).toFixed(1));
+  }
+  return Number(Math.max(args.realizedPips, args.peakPips).toFixed(1));
 }
 
 export async function POST(req: NextRequest) {
@@ -125,23 +226,18 @@ export async function POST(req: NextRequest) {
     const currentPips = points * GOLD_PIPS_MULTIPLIER;
     const maxFloatingPips = Math.max(Number(current.max_floating_pips ?? 0), currentPips);
 
-    let hitOutcome: "tp1" | "tp2" | "tp3" | "sl" | null = null;
-    if (current.type === "buy") {
-      if (livePrice <= Number(current.sl)) hitOutcome = "sl";
-      else if (current.tp3 !== null && livePrice >= Number(current.tp3)) hitOutcome = "tp3";
-      else if (livePrice >= Number(current.tp2)) hitOutcome = "tp2";
-      else if (livePrice >= Number(current.tp1)) hitOutcome = "tp1";
-    } else {
-      if (livePrice >= Number(current.sl)) hitOutcome = "sl";
-      else if (current.tp3 !== null && livePrice <= Number(current.tp3)) hitOutcome = "tp3";
-      else if (livePrice <= Number(current.tp2)) hitOutcome = "tp2";
-      else if (livePrice <= Number(current.tp1)) hitOutcome = "tp1";
-    }
+    const hitOutcome = inferHitOutcome({
+      type: current.type,
+      livePrice,
+      sl: Number(current.sl),
+      tp1: Number(current.tp1),
+      tp2: Number(current.tp2),
+      tp3: current.tp3 === null ? null : Number(current.tp3),
+    });
 
     if (hitOutcome) {
       const realizedPips = currentPips;
       const peakPips = Math.max(maxFloatingPips, realizedPips);
-      const historyPips = Math.max(realizedPips, peakPips);
 
       const { error: closeError } = await admin
         .from("signals")
@@ -154,12 +250,28 @@ export async function POST(req: NextRequest) {
         .eq("id", current.id);
       if (closeError) return NextResponse.json({ error: closeError.message }, { status: 500 });
 
+      const classifiedOutcome = classifyCycleOutcome({
+        type: current.type,
+        entryTarget: Number(current.entry_target),
+        closePrice: livePrice,
+        sl: Number(current.sl),
+        tp1: Number(current.tp1),
+        tp2: Number(current.tp2),
+        tp3: current.tp3 === null ? null : Number(current.tp3),
+        peakPips,
+      });
+      const historyPips = computeStoredNetPips({
+        outcome: classifiedOutcome,
+        realizedPips,
+        peakPips,
+      });
+
       const { data: logData, error: logError } = await admin
         .from("performance_logs")
         .insert({
           mode: current.mode,
           type: current.type,
-          outcome: hitOutcome,
+          outcome: classifiedOutcome,
           net_pips: historyPips,
           peak_pips: peakPips,
         })
@@ -167,13 +279,23 @@ export async function POST(req: NextRequest) {
         .single();
       if (logError) return NextResponse.json({ error: logError.message }, { status: 500 });
 
+      await sendTelegramTradingAlert([
+        "📊 *SHINOBI INDI Closed*",
+        `*Mode:* ${current.mode.toUpperCase()}`,
+        `*Pair:* ${pair}`,
+        `*Type:* ${current.type.toUpperCase()}`,
+        `*Outcome:* ${classifiedOutcome.toUpperCase()}`,
+        `*Net Pips:* ${historyPips.toFixed(1)}`,
+        `*Peak Pips:* ${peakPips.toFixed(1)}`,
+      ]);
+
       return NextResponse.json({
         ok: true,
         event,
         auto_closed: true,
         signal_id: current.id,
         performance_log_id: logData.id,
-        outcome: hitOutcome,
+        outcome: classifiedOutcome,
         realized_pips: realizedPips,
         peak_pips: peakPips,
         stored_history_pips: historyPips,
@@ -193,9 +315,8 @@ export async function POST(req: NextRequest) {
 
   if (event === "signal_closed") {
     const closePrice = asNumber(body.close_price ?? body.live_price ?? body.price);
-    const outcome = (normalized(body.outcome) ?? "tp1") as "tp1" | "tp2" | "tp3" | "be" | "sl";
-
-    if (!["tp1", "tp2", "tp3", "be", "sl"].includes(outcome)) {
+    const outcomeRaw = normalized(body.outcome);
+    if (outcomeRaw !== null && !["tp1", "tp2", "tp3", "be", "sl"].includes(outcomeRaw)) {
       return NextResponse.json({ error: "outcome must be tp1, tp2, tp3, be or sl" }, { status: 400 });
     }
 
@@ -205,7 +326,7 @@ export async function POST(req: NextRequest) {
 
     const { data: current, error: currentError } = await admin
       .from("signals")
-      .select("id, type, entry_target, max_floating_pips")
+      .select("id, type, entry_target, max_floating_pips, sl, tp1, tp2, tp3")
       .eq("pair", pair)
       .eq("mode", mode)
       .eq("status", "active")
@@ -219,7 +340,23 @@ export async function POST(req: NextRequest) {
     const points = current.type === "buy" ? closePrice - Number(current.entry_target) : Number(current.entry_target) - closePrice;
     const realizedPips = points * GOLD_PIPS_MULTIPLIER;
     const peakPips = Math.max(Number(current.max_floating_pips ?? 0), realizedPips);
-    const historyPips = Math.max(realizedPips, peakPips);
+    const classifiedOutcome = outcomeRaw
+      ? (outcomeRaw as "tp1" | "tp2" | "tp3" | "be" | "sl")
+      : classifyCycleOutcome({
+        type: current.type,
+        entryTarget: Number(current.entry_target),
+        closePrice,
+        sl: Number(current.sl),
+        tp1: Number(current.tp1),
+        tp2: Number(current.tp2),
+        tp3: current.tp3 === null ? null : Number(current.tp3),
+        peakPips,
+      });
+    const historyPips = computeStoredNetPips({
+      outcome: classifiedOutcome,
+      realizedPips,
+      peakPips,
+    });
 
     const { error: closeError } = await admin
       .from("signals")
@@ -232,13 +369,23 @@ export async function POST(req: NextRequest) {
       .insert({
         mode,
         type: current.type,
-        outcome,
+        outcome: classifiedOutcome,
         net_pips: historyPips,
         peak_pips: peakPips,
       })
       .select("id")
       .single();
     if (logError) return NextResponse.json({ error: logError.message }, { status: 500 });
+
+    await sendTelegramTradingAlert([
+      "📊 *SHINOBI INDI Closed*",
+      `*Mode:* ${mode.toUpperCase()}`,
+      `*Pair:* ${pair}`,
+      `*Type:* ${current.type.toUpperCase()}`,
+      `*Outcome:* ${classifiedOutcome.toUpperCase()}`,
+      `*Net Pips:* ${historyPips.toFixed(1)}`,
+      `*Peak Pips:* ${peakPips.toFixed(1)}`,
+    ]);
 
     return NextResponse.json({
       ok: true,
@@ -292,7 +439,7 @@ export async function POST(req: NextRequest) {
   if (event === "signal") {
     const { data: previous } = await admin
       .from("signals")
-      .select("id, type, entry_target, live_price, max_floating_pips, created_at")
+      .select("id, type, entry_target, live_price, max_floating_pips, created_at, sl, tp1, tp2, tp3")
       .eq("pair", pair)
       .eq("mode", mode)
       .eq("status", "active")
@@ -308,22 +455,63 @@ export async function POST(req: NextRequest) {
           : Number(previous.entry_target) - closePrice;
       const realizedPips = points * GOLD_PIPS_MULTIPLIER;
       const peakPips = Math.max(Number(previous.max_floating_pips ?? 0), realizedPips);
-      const outcome: "tp1" | "sl" = peakPips > 0 ? "tp1" : "sl";
+      const outcome = classifyCycleOutcome({
+        type: previous.type,
+        entryTarget: Number(previous.entry_target),
+        closePrice,
+        sl: Number(previous.sl),
+        tp1: Number(previous.tp1),
+        tp2: Number(previous.tp2),
+        tp3: previous.tp3 === null ? null : Number(previous.tp3),
+        peakPips,
+      });
 
       await admin
         .from("signals")
         .update({ status: "closed", updated_at: new Date().toISOString() })
         .eq("id", previous.id);
 
+      const historyPips = computeStoredNetPips({
+        outcome,
+        realizedPips,
+        peakPips,
+      });
+
       await admin.from("performance_logs").insert({
         mode,
         type: previous.type,
         outcome,
-        net_pips: realizedPips,
+        net_pips: historyPips,
         peak_pips: peakPips,
       });
     }
   }
+
+  const immediateHit = event === "signal"
+    ? inferHitOutcome({
+      type,
+      livePrice,
+      sl,
+      tp1,
+      tp2,
+      tp3,
+    })
+    : null;
+
+  const immediateOutcome = immediateHit
+    ? classifyCycleOutcome({
+      type,
+      entryTarget,
+      closePrice: livePrice,
+      sl,
+      tp1,
+      tp2,
+      tp3,
+      peakPips: Math.max(0, (type === "buy" ? livePrice - entryTarget : entryTarget - livePrice) * GOLD_PIPS_MULTIPLIER),
+    })
+    : null;
+
+  const finalStatus = immediateHit ? "closed" : status;
 
   const { data, error } = await admin
     .from("signals")
@@ -338,7 +526,7 @@ export async function POST(req: NextRequest) {
       tp2,
       tp3,
       max_floating_pips: 0,
-      status,
+      status: finalStatus,
       updated_at: new Date().toISOString(),
     })
     .select("id, created_at")
@@ -346,6 +534,65 @@ export async function POST(req: NextRequest) {
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  await sendTelegramTradingAlert([
+    "🚨 *New SHINOBI INDI*",
+    `*Mode:* ${mode.toUpperCase()}`,
+    `*Pair:* ${pair}`,
+    `*Type:* ${type.toUpperCase()}`,
+    `*Entry:* ${entryTarget.toFixed(2)}`,
+    `*Live:* ${livePrice.toFixed(2)}`,
+    `*SL:* ${sl.toFixed(2)}`,
+    `*TP1:* ${tp1.toFixed(2)}`,
+    `*TP2:* ${tp2.toFixed(2)}`,
+    `*TP3:* ${tp3 === null ? "-" : tp3.toFixed(2)}`,
+  ]);
+
+  if (event === "signal" && immediateOutcome) {
+    const points = type === "buy" ? livePrice - entryTarget : entryTarget - livePrice;
+    const realizedPips = points * GOLD_PIPS_MULTIPLIER;
+    const peakPips = Math.max(0, realizedPips);
+    const historyPips = computeStoredNetPips({
+      outcome: immediateOutcome,
+      realizedPips,
+      peakPips,
+    });
+
+    const { data: logData, error: logError } = await admin
+      .from("performance_logs")
+      .insert({
+        mode,
+        type,
+        outcome: immediateOutcome,
+        net_pips: historyPips,
+        peak_pips: peakPips,
+      })
+      .select("id")
+      .single();
+
+    if (logError) {
+      return NextResponse.json({ error: logError.message }, { status: 500 });
+    }
+
+    await sendTelegramTradingAlert([
+      "📊 *SHINOBI INDI Closed*",
+      `*Mode:* ${mode.toUpperCase()}`,
+      `*Pair:* ${pair}`,
+      `*Type:* ${type.toUpperCase()}`,
+      `*Outcome:* ${immediateOutcome.toUpperCase()}`,
+      `*Net Pips:* ${historyPips.toFixed(1)}`,
+      `*Peak Pips:* ${peakPips.toFixed(1)}`,
+    ]);
+
+    return NextResponse.json({
+      ok: true,
+      signal_id: data.id,
+      created_at: data.created_at,
+      auto_closed: true,
+      performance_log_id: logData.id,
+      outcome: immediateOutcome,
+    });
   }
 
   return NextResponse.json({ ok: true, signal_id: data.id, created_at: data.created_at });

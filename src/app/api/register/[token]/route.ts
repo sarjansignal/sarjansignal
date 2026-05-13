@@ -2,13 +2,72 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { generateAccessKey } from "@/lib/keygen";
 
+function toPublicRegisterError(message: string) {
+  const normalized = message.toLowerCase();
+  if (
+    normalized.includes("schema cache") &&
+    (normalized.includes("public.link_redemptions") || normalized.includes("public.package_links"))
+  ) {
+    return "Registration database setup is incomplete. Run supabase/schema.sql in the Supabase SQL Editor, then try again.";
+  }
+
+  return message;
+}
+
+function internalError(message: string) {
+  return NextResponse.json({ error: toPublicRegisterError(message) }, { status: 500 });
+}
+
+async function sendTelegramRegisterAlert(payload: {
+  name: string;
+  email: string;
+  phone: string;
+  packageName: string;
+  durationDays: number;
+  accessKey: string;
+  expiredAt: string;
+  linkToken: string;
+  isExistingSubscriber: boolean;
+}) {
+  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+  if (!botToken || !chatId) return;
+
+  const message = [
+    "🚀 *New SHINOBI INDI Registration*",
+    "",
+    `*Name:* ${payload.name}`,
+    `*Email:* ${payload.email}`,
+    `*Phone:* ${payload.phone}`,
+    `*Package:* ${payload.packageName} (${payload.durationDays} days)`,
+    `*Status:* ${payload.isExistingSubscriber ? "Existing subscriber (renewed/updated)" : "New subscriber"}`,
+    `*Access Key:* \`${payload.accessKey}\``,
+    `*Expiry:* ${new Date(payload.expiredAt).toLocaleString("en-GB", { timeZone: "Asia/Kuala_Lumpur" })}`,
+    `*Token:* \`${payload.linkToken}\``,
+  ].join("\n");
+
+  try {
+    await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: message,
+        parse_mode: "Markdown",
+      }),
+    });
+  } catch {
+    // swallow alert failure so registration flow is never blocked
+  }
+}
+
 export async function GET(_: Request, { params }: { params: Promise<{ token: string }> }) {
   const admin = getSupabaseAdmin();
   if (!admin) return NextResponse.json({ error: "Missing admin env" }, { status: 500 });
   const { token } = await params;
 
   const { data, error } = await admin.from("package_links").select("package_name,duration_days,is_active,click_count,agent_name").eq("token", token).maybeSingle();
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return internalError(error.message);
   if (!data || !data.is_active) return NextResponse.json({ error: "Invalid or inactive link" }, { status: 404 });
 
   return NextResponse.json({ ok: true, package_name: data.package_name, duration_days: data.duration_days, agent_name: (data as { agent_name?: string | null }).agent_name ?? null });
@@ -43,18 +102,52 @@ export async function POST(req: Request, { params }: { params: Promise<{ token: 
     return NextResponse.json({ error: "Please enter a valid phone number (9-15 digits)." }, { status: 400 });
   }
 
-  const { data: link, error: linkError } = await admin.from("package_links").select("package_name,duration_days,is_active,agent_name").eq("token", token).maybeSingle();
-  if (linkError) return NextResponse.json({ error: linkError.message }, { status: 500 });
+  const { data: link, error: linkError } = await admin
+    .from("package_links")
+    .select("id,package_name,duration_days,is_active,agent_name")
+    .eq("token", token)
+    .maybeSingle();
+  if (linkError) return internalError(linkError.message);
   if (!link || !link.is_active) return NextResponse.json({ error: "Invalid or inactive link" }, { status: 404 });
+
+  const { data: priorRedemptionByEmail, error: priorRedemptionByEmailError } = await admin
+    .from("link_redemptions")
+    .select("id,subscriber_id")
+    .eq("package_link_id", link.id)
+    .eq("email_normalized", normalizedEmail)
+    .limit(1)
+    .maybeSingle();
+  if (priorRedemptionByEmailError) return internalError(priorRedemptionByEmailError.message);
+
+  const { data: priorRedemptionByPhone, error: priorRedemptionByPhoneError } = await admin
+    .from("link_redemptions")
+    .select("id,subscriber_id")
+    .eq("package_link_id", link.id)
+    .eq("phone_normalized", normalizedPhone)
+    .limit(1)
+    .maybeSingle();
+  if (priorRedemptionByPhoneError) return internalError(priorRedemptionByPhoneError.message);
+
+  if (priorRedemptionByEmail || priorRedemptionByPhone) {
+    return NextResponse.json(
+      {
+        error: "Link already redeemed for this account. Please use a new package link for renewal.",
+        duplicate_redeem: true,
+      },
+      { status: 409 },
+    );
+  }
 
   const extensionMs = Number(link.duration_days) * 24 * 60 * 60 * 1000;
   const nowMs = Date.now();
 
   let subscriberId = "";
+  let isExistingSubscriber = false;
   const { data: existingSub, error: existingSubError } = await admin.from("subscribers").select("id").eq("email", normalizedEmail).maybeSingle();
-  if (existingSubError) return NextResponse.json({ error: existingSubError.message }, { status: 500 });
+  if (existingSubError) return internalError(existingSubError.message);
 
   if (existingSub) {
+    isExistingSubscriber = true;
     subscriberId = existingSub.id;
     await admin
       .from("subscribers")
@@ -79,7 +172,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ token: 
       })
       .select("id")
       .single();
-    if (subError) return NextResponse.json({ error: subError.message }, { status: 500 });
+    if (subError) return internalError(subError.message);
     subscriberId = sub.id;
   }
 
@@ -88,7 +181,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ token: 
     .select("id,key,expired_at")
     .eq("subscriber_id", subscriberId)
     .maybeSingle();
-  if (existingKeyError) return NextResponse.json({ error: existingKeyError.message }, { status: 500 });
+  if (existingKeyError) return internalError(existingKeyError.message);
 
   let accessKey = existingKey?.key ?? "";
   let keyErrorMsg = "";
@@ -124,7 +217,27 @@ export async function POST(req: Request, { params }: { params: Promise<{ token: 
     }
   }
 
-  if (keyErrorMsg) return NextResponse.json({ error: keyErrorMsg }, { status: 500 });
+  if (keyErrorMsg) return internalError(keyErrorMsg);
+
+  const { error: redemptionInsertError } = await admin.from("link_redemptions").insert({
+    package_link_id: link.id,
+    subscriber_id: subscriberId,
+    email_normalized: normalizedEmail,
+    phone_normalized: normalizedPhone,
+  });
+  if (redemptionInsertError) {
+    // If concurrent duplicate registration happened at same time, return duplicate status.
+    if ((redemptionInsertError as { code?: string }).code === "23505") {
+      return NextResponse.json(
+        {
+          error: "Link already redeemed for this account. Please use a new package link for renewal.",
+          duplicate_redeem: true,
+        },
+        { status: 409 },
+      );
+    }
+    return internalError(redemptionInsertError.message);
+  }
 
   const { data: linkCounterData } = await admin
     .from("package_links")
@@ -139,6 +252,18 @@ export async function POST(req: Request, { params }: { params: Promise<{ token: 
       last_clicked_at: new Date().toISOString(),
     })
     .eq("token", token);
+
+  await sendTelegramRegisterAlert({
+    name: normalizedName,
+    email: normalizedEmail,
+    phone: normalizedPhone,
+    packageName: link.package_name,
+    durationDays: Number(link.duration_days),
+    accessKey,
+    expiredAt: expiresAt,
+    linkToken: token,
+    isExistingSubscriber,
+  });
 
   return NextResponse.json({ ok: true, access_key: accessKey, expired_at: expiresAt, package_name: link.package_name, duration_days: link.duration_days });
 }
