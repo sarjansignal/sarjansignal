@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, BarChart3, CalendarClock, Clipboard, Moon, Package, ShieldCheck, Signal, Sun, Timer, User } from "lucide-react";
+import Image from "next/image";
+import { AlertTriangle, BarChart3, CalendarClock, Clipboard, Eye, EyeOff, Moon, Package, ShieldCheck, Signal, Sun, Timer, User } from "lucide-react";
 import { getSupabaseClient } from "@/lib/supabase";
 import type { PerformanceLog, Signal as TradingSignal, SignalMode } from "@/lib/types";
 
@@ -23,6 +24,7 @@ const SCALPING_INTERVAL_SECONDS = 30 * 60;
 const INTRADAY_INTERVAL_SECONDS = 4 * 60 * 60;
 const GOLD_PIPS_MULTIPLIER = 10;
 const PERFORMANCE_DEFAULT_PAGE_SIZE = 10;
+const ACCESS_KEY_STORAGE_KEY = "sarjan-access-key";
 
 function fmt(value: number) {
   return value.toFixed(2);
@@ -71,6 +73,7 @@ export default function Home() {
   const [accessKey, setAccessKey] = useState("");
   const [authError, setAuthError] = useState<string | null>(null);
   const [loadingAuth, setLoadingAuth] = useState(false);
+  const [showAccessKey, setShowAccessKey] = useState(false);
 
   const [tab, setTab] = useState<Tab>("signal");
   const [mode, setMode] = useState<SignalMode>("scalping");
@@ -134,8 +137,24 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    const savedAccessKey = window.localStorage.getItem(ACCESS_KEY_STORAGE_KEY);
+    if (savedAccessKey) setAccessKey(savedAccessKey);
+  }, []);
+
+  useEffect(() => {
     if (typeof window !== "undefined") window.localStorage.setItem("sarjan-theme", theme);
   }, [theme]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const trimmed = accessKey.trim();
+    if (!trimmed) {
+      window.localStorage.removeItem(ACCESS_KEY_STORAGE_KEY);
+      return;
+    }
+    window.localStorage.setItem(ACCESS_KEY_STORAGE_KEY, trimmed);
+  }, [accessKey]);
 
   useEffect(() => {
     const saved = typeof window !== "undefined" ? window.localStorage.getItem("sarjan-design") : null;
@@ -485,7 +504,6 @@ export default function Home() {
 
   const logout = () => {
     setAuthorized(false);
-    setAccessKey("");
     setAuthError(null);
     setLoadingAuth(false);
     setSessionSeconds(SESSION_MINUTES * 60);
@@ -496,6 +514,13 @@ export default function Home() {
     setSubscriptionExpiry(null);
     setShowLoginDisclaimer(false);
     setActiveSignalPopup(null);
+  };
+
+  const clearSavedAccessKey = () => {
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(ACCESS_KEY_STORAGE_KEY);
+    }
+    setAccessKey("");
   };
 
   const refreshNow = async () => {
@@ -513,6 +538,16 @@ export default function Home() {
     return (
       <main className={`grid min-h-screen place-items-center px-4 ${loginDark ? "" : "light-theme bg-[#e2e8f0] text-[#0f172a]"} ${designVariant === "executive" ? "design-executive" : ""}`}>
         <section className={`scanlines w-full max-w-md rounded-xl p-6 ${loginDark ? "border border-emerald-500/50 bg-black/80 shadow-[0_0_40px_rgba(16,185,129,0.2)]" : "border border-[#0f172a]/20 bg-[#f8fafc] shadow-[0_10px_30px_rgba(15,23,42,0.14)]"}`}>
+          <div className="mb-4 flex justify-center">
+            <Image
+              src="/sarjan-logo.png"
+              alt="SARJAN SIGNAL logo"
+              width={130}
+              height={130}
+              priority
+              className="h-[130px] w-[130px] object-contain"
+            />
+          </div>
           <div className="mb-3 flex justify-end gap-2">
             <button
               onClick={() => setDesignVariant((prev) => (prev === "tactical" ? "executive" : "tactical"))}
@@ -544,12 +579,24 @@ export default function Home() {
           </h1>
           <p className={`mb-6 text-sm ${loginDark ? "text-emerald-300/70" : "text-slate-700"}`}>Trading Disiplin, Arahan Sarjan.</p>
           <label className="mb-2 block text-xs uppercase tracking-[0.25em] text-emerald-300">Authorization Key</label>
-          <input
-            value={accessKey}
-            onChange={(e) => setAccessKey(e.target.value)}
-            className={`w-full rounded border px-3 py-2 outline-none ring-emerald-400/40 focus:ring ${loginDark ? "border-emerald-400/30 bg-black text-emerald-200" : "border-emerald-700/60 bg-white text-[#0f172a]"}`}
-            placeholder="ENTER_KEY"
-          />
+          <div className="relative">
+            <input
+              type={showAccessKey ? "text" : "password"}
+              value={accessKey}
+              onChange={(e) => setAccessKey(e.target.value)}
+              className={`w-full rounded border px-3 py-2 pr-11 outline-none ring-emerald-400/40 focus:ring ${loginDark ? "border-emerald-400/30 bg-black text-emerald-200" : "border-emerald-700/60 bg-white text-[#0f172a]"}`}
+              placeholder="ENTER_KEY"
+            />
+            <button
+              type="button"
+              onClick={() => setShowAccessKey((prev) => !prev)}
+              className={`absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 ${loginDark ? "text-emerald-300 hover:bg-emerald-500/15" : "text-slate-600 hover:bg-slate-100"}`}
+              aria-label={showAccessKey ? "Hide access key" : "Show access key"}
+              title={showAccessKey ? "Hide" : "Show"}
+            >
+              {showAccessKey ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
           {authError && <p className="mt-3 flex items-center gap-2 text-sm text-red-400"><AlertTriangle size={14} />{authError}</p>}
           {!supabase && <p className="mt-3 text-xs text-red-400">Supabase environment variables are missing.</p>}
           <button
@@ -562,6 +609,17 @@ export default function Home() {
             }`}
           >
             {loadingAuth ? "VALIDATING..." : "AUTHORIZE"}
+          </button>
+          <button
+            onClick={clearSavedAccessKey}
+            type="button"
+            className={`mt-2 w-full rounded border py-2 text-xs ${
+              loginDark
+                ? "border-red-400/40 text-red-300 hover:bg-red-500/10"
+                : "border-red-500/40 text-red-700 hover:bg-red-50"
+            }`}
+          >
+            CLEAR SAVED KEY
           </button>
         </section>
       </main>
