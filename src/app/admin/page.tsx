@@ -81,6 +81,15 @@ function toLocalDatetimeInput(value: string | null) {
   return local.toISOString().slice(0, 16);
 }
 
+function normalizePackageName(packageName: string | null | undefined) {
+  const clean = (packageName ?? "").trim();
+  if (!clean) return "Unknown";
+  if (/trial/i.test(clean)) return "TRIAL 3D";
+  const packageMatch = clean.match(/^package\s*(\d+)\s*d$/i);
+  if (packageMatch) return `Package ${Number(packageMatch[1])}D`;
+  return clean;
+}
+
 function formatLag(seconds: number | null) {
   if (seconds === null) return "-";
   if (seconds < 60) return `${seconds}s`;
@@ -218,10 +227,11 @@ export default function AdminPage() {
   const packageOptions = useMemo(() => {
     const names = new Set<string>(["Package 7D", "Package 15D", "Package 30D"]);
     for (const link of links) {
-      const name = link.package_name?.trim();
+      const name = normalizePackageName(link.package_name);
       if (name) names.add(name);
     }
     const parseDays = (label: string) => {
+      if (/trial/i.test(label)) return 3;
       const match = label.match(/(\d+)\s*D/i);
       return match ? Number(match[1]) : Number.POSITIVE_INFINITY;
     };
@@ -271,6 +281,7 @@ export default function AdminPage() {
     const package7D = subs.filter((s) => /7D/i.test(s.package_name)).length;
     const package15D = subs.filter((s) => /15D/i.test(s.package_name)).length;
     const package30D = subs.filter((s) => /30D/i.test(s.package_name)).length;
+    const packageTrial3D = subs.filter((s) => /trial/i.test(s.package_name)).length;
 
     return {
       total,
@@ -283,6 +294,7 @@ export default function AdminPage() {
       package7D,
       package15D,
       package30D,
+      packageTrial3D,
     };
   }, [subs]);
 
@@ -321,7 +333,7 @@ export default function AdminPage() {
     const res = await fetch("/api/admin/subscribers", {
       method: "POST",
       headers: { ...headers, "content-type": "application/json" },
-      body: JSON.stringify(newSub),
+      body: JSON.stringify({ ...newSub, package_name: normalizePackageName(newSub.package_name) }),
     });
     const json = await res.json();
     if (!res.ok) {
@@ -340,7 +352,7 @@ export default function AdminPage() {
       email: s.email,
       phone: s.phone ?? "",
       introducer: s.introducer ?? "",
-      package_name: s.package_name,
+      package_name: normalizePackageName(s.package_name),
       status: s.status,
       key_expired_at: toLocalDatetimeInput(s.key_expired_at),
     });
@@ -355,7 +367,7 @@ export default function AdminPage() {
         email: editSubDraft.email,
         phone: editSubDraft.phone || null,
         introducer: editSubDraft.introducer || null,
-        package_name: editSubDraft.package_name,
+        package_name: normalizePackageName(editSubDraft.package_name),
         status: editSubDraft.status,
         key_expired_at: editSubDraft.key_expired_at ? new Date(editSubDraft.key_expired_at).toISOString() : null,
       }),
@@ -647,6 +659,7 @@ export default function AdminPage() {
               <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-3"><p className="text-xs text-slate-400">Package 7D</p><p className="mt-1 text-lg font-semibold">{subscriberOverview.package7D}</p></div>
               <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-3"><p className="text-xs text-slate-400">Package 15D</p><p className="mt-1 text-lg font-semibold">{subscriberOverview.package15D}</p></div>
               <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-3"><p className="text-xs text-slate-400">Package 30D</p><p className="mt-1 text-lg font-semibold">{subscriberOverview.package30D}</p></div>
+              <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-3"><p className="text-xs text-slate-400">Trial 3D</p><p className="mt-1 text-lg font-semibold">{subscriberOverview.packageTrial3D}</p></div>
             </section>
 
             <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-4">
@@ -759,7 +772,7 @@ export default function AdminPage() {
                               <option key={pkg} value={pkg}>{pkg}</option>
                             ))}
                           </select>
-                        ) : s.package_name}
+                        ) : normalizePackageName(s.package_name)}
                       </td>
                       <td className="px-3 py-2">
                         {editingSubId === s.id ? (
