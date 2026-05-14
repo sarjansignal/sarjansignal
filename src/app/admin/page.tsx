@@ -74,6 +74,13 @@ function formatAdminDate(value: string | null) {
   });
 }
 
+function toLocalDatetimeInput(value: string | null) {
+  if (!value) return "";
+  const date = new Date(value);
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
+}
+
 function formatLag(seconds: number | null) {
   if (seconds === null) return "-";
   if (seconds < 60) return `${seconds}s`;
@@ -82,6 +89,8 @@ function formatLag(seconds: number | null) {
   const m = Math.floor((seconds % 3600) / 60);
   return `${h}h ${m}m`;
 }
+
+const PERFORMANCE_EDIT_ENABLED = false;
 
 export default function AdminPage() {
   const [adminKey, setAdminKey] = useState("");
@@ -108,6 +117,7 @@ export default function AdminPage() {
     introducer: "",
     package_name: "Package 7D",
     status: "active",
+    key_expired_at: "",
   });
   const [editDraft, setEditDraft] = useState<Record<string, { outcome: PerfLog["outcome"]; net_pips: string; peak_pips: string; note: string }>>({});
   const [selectedPerfIds, setSelectedPerfIds] = useState<string[]>([]);
@@ -204,6 +214,24 @@ export default function AdminPage() {
       return ts >= perfStartMs && ts <= perfEndMs;
     });
   }, [logs, perfMode, perfStartMs, perfEndMs]);
+
+  const packageOptions = useMemo(() => {
+    const names = new Set<string>(["Package 7D", "Package 15D", "Package 30D"]);
+    for (const link of links) {
+      const name = link.package_name?.trim();
+      if (name) names.add(name);
+    }
+    const parseDays = (label: string) => {
+      const match = label.match(/(\d+)\s*D/i);
+      return match ? Number(match[1]) : Number.POSITIVE_INFINITY;
+    };
+    return Array.from(names).sort((a, b) => {
+      const ad = parseDays(a);
+      const bd = parseDays(b);
+      if (ad !== bd) return ad - bd;
+      return a.localeCompare(b);
+    });
+  }, [links]);
 
   const totalPerfPages = useMemo(() => {
     if (perfRowsPerPage === "all") return 1;
@@ -314,6 +342,7 @@ export default function AdminPage() {
       introducer: s.introducer ?? "",
       package_name: s.package_name,
       status: s.status,
+      key_expired_at: toLocalDatetimeInput(s.key_expired_at),
     });
   };
 
@@ -328,6 +357,7 @@ export default function AdminPage() {
         introducer: editSubDraft.introducer || null,
         package_name: editSubDraft.package_name,
         status: editSubDraft.status,
+        key_expired_at: editSubDraft.key_expired_at ? new Date(editSubDraft.key_expired_at).toISOString() : null,
       }),
     });
     const json = await res.json();
@@ -355,6 +385,10 @@ export default function AdminPage() {
   };
 
   const saveLog = async (id: string) => {
+    if (!PERFORMANCE_EDIT_ENABLED) {
+      setStatus("Performance edit is disabled here. Please edit from HQ.");
+      return;
+    }
     const d = editDraft[id];
     if (!d) return;
     const res = await fetch(`/api/admin/performance-logs/${id}`, {
@@ -378,6 +412,10 @@ export default function AdminPage() {
   };
 
   const deleteLog = async (id: string) => {
+    if (!PERFORMANCE_EDIT_ENABLED) {
+      setStatus("Performance delete is disabled here. Please manage from HQ.");
+      return;
+    }
     const ok = window.confirm("Delete this performance record?");
     if (!ok) return;
     const res = await fetch(`/api/admin/performance-logs/${id}`, { method: "DELETE", headers });
@@ -392,6 +430,10 @@ export default function AdminPage() {
   };
 
   const deleteSelectedLogs = async () => {
+    if (!PERFORMANCE_EDIT_ENABLED) {
+      setStatus("Performance bulk delete is disabled here. Please manage from HQ.");
+      return;
+    }
     if (!selectedPerfIds.length) return;
     const ok = window.confirm(`Delete ${selectedPerfIds.length} selected performance records?`);
     if (!ok) return;
@@ -615,9 +657,9 @@ export default function AdminPage() {
                 <input placeholder="Phone" value={newSub.phone} onChange={(e) => setNewSub((s) => ({ ...s, phone: e.target.value }))} className="rounded border border-slate-600 bg-slate-950 px-3 py-2" />
                 <input placeholder="Introducer" value={newSub.introducer} onChange={(e) => setNewSub((s) => ({ ...s, introducer: e.target.value }))} className="rounded border border-slate-600 bg-slate-950 px-3 py-2" />
                 <select value={newSub.package_name} onChange={(e) => setNewSub((s) => ({ ...s, package_name: e.target.value }))} className="rounded border border-slate-600 bg-slate-950 px-3 py-2">
-                  <option value="Package 7D">Package 7D</option>
-                  <option value="Package 15D">Package 15D</option>
-                  <option value="Package 30D">Package 30D</option>
+                  {packageOptions.map((pkg) => (
+                    <option key={pkg} value={pkg}>{pkg}</option>
+                  ))}
                 </select>
               </div>
               <button onClick={() => void createSubscriber()} className="mt-3 rounded bg-emerald-600 px-3 py-2 font-semibold">Create</button>
@@ -713,9 +755,9 @@ export default function AdminPage() {
                       <td className="px-3 py-2">
                         {editingSubId === s.id ? (
                           <select value={editSubDraft.package_name} onChange={(e) => setEditSubDraft((d) => ({ ...d, package_name: e.target.value }))} className="w-32 rounded border border-slate-600 bg-slate-950 px-2 py-1">
-                            <option value="Package 7D">Package 7D</option>
-                            <option value="Package 15D">Package 15D</option>
-                            <option value="Package 30D">Package 30D</option>
+                            {packageOptions.map((pkg) => (
+                              <option key={pkg} value={pkg}>{pkg}</option>
+                            ))}
                           </select>
                         ) : s.package_name}
                       </td>
@@ -729,7 +771,18 @@ export default function AdminPage() {
                       </td>
                       <td className="px-3 py-2 font-mono text-xs">{s.access_key ?? "-"}</td>
                       <td className="px-3 py-2 text-xs">{formatAdminDate(s.last_login_at)}</td>
-                      <td className="px-3 py-2 text-xs">{formatAdminDate(s.key_expired_at)}</td>
+                      <td className="px-3 py-2 text-xs">
+                        {editingSubId === s.id ? (
+                          <input
+                            type="datetime-local"
+                            value={editSubDraft.key_expired_at}
+                            onChange={(e) => setEditSubDraft((d) => ({ ...d, key_expired_at: e.target.value }))}
+                            className="rounded border border-slate-600 bg-slate-950 px-2 py-1"
+                          />
+                        ) : (
+                          formatAdminDate(s.key_expired_at)
+                        )}
+                      </td>
                       <td className="px-3 py-2">
                         {editingSubId === s.id ? (
                           <div className="flex gap-1">
@@ -821,25 +874,6 @@ export default function AdminPage() {
                       </select>
                     </div>
                     <button
-                      onClick={() => setSelectedPerfIds(filteredPerfLogs.map((l) => l.id))}
-                      className="rounded border border-slate-600 bg-slate-900 px-3 py-2 text-xs font-semibold hover:bg-slate-800"
-                    >
-                      Select All
-                    </button>
-                    <button
-                      onClick={() => setSelectedPerfIds([])}
-                      className="rounded border border-slate-600 bg-slate-900 px-3 py-2 text-xs font-semibold hover:bg-slate-800"
-                    >
-                      Clear
-                    </button>
-                    <button
-                      onClick={() => void deleteSelectedLogs()}
-                      disabled={!selectedPerfIds.length}
-                      className="rounded border border-rose-500 bg-rose-700 px-3 py-2 text-xs font-semibold hover:bg-rose-600 disabled:opacity-40"
-                    >
-                      Delete Selected ({selectedPerfIds.length})
-                    </button>
-                    <button
                       onClick={exportPerfCsv}
                       className="rounded border border-emerald-500 bg-emerald-700 px-3 py-2 text-xs font-semibold hover:bg-emerald-600"
                     >
@@ -883,7 +917,6 @@ export default function AdminPage() {
             <table className="w-full text-left text-sm">
               <thead className="bg-slate-800/80">
                 <tr>
-                  <th className="px-3 py-2">Tick</th>
                   <th className="px-3 py-2">Time</th>
                   <th className="px-3 py-2">Mode</th>
                   <th className="px-3 py-2">Type</th>
@@ -891,45 +924,19 @@ export default function AdminPage() {
                   <th className="px-3 py-2">Net Pips</th>
                   <th className="px-3 py-2">Peak Pips</th>
                   <th className="px-3 py-2">Note</th>
-                  <th className="px-3 py-2">Action</th>
                 </tr>
               </thead>
               <tbody>
                 {visiblePerfLogs.map((l) => {
-                  const d = editDraft[l.id] ?? {
-                    outcome: l.outcome,
-                    net_pips: String(l.net_pips),
-                    peak_pips: l.peak_pips === null ? "" : String(l.peak_pips),
-                    note: "",
-                  };
-
                   return (
                     <tr key={l.id} className="border-t border-slate-800">
-                      <td className="px-3 py-2">
-                        <input
-                          type="checkbox"
-                          checked={selectedPerfIds.includes(l.id)}
-                          onChange={(e) => togglePerfSelection(l.id, e.target.checked)}
-                          className="h-4 w-4 accent-blue-600"
-                        />
-                      </td>
                       <td className="px-3 py-2">{formatAdminDate(l.created_at)}</td>
                       <td className="px-3 py-2">{l.mode}</td>
                       <td className="px-3 py-2">{l.type}</td>
-                      <td className="px-3 py-2">
-                        <select value={d.outcome} onChange={(e) => setEditDraft((p) => ({ ...p, [l.id]: { ...d, outcome: e.target.value as PerfLog["outcome"] } }))} className="rounded border border-slate-600 bg-slate-950 px-2 py-1">
-                          <option value="tp1">tp1</option><option value="tp2">tp2</option><option value="tp3">tp3</option><option value="be">be</option><option value="sl">sl</option>
-                        </select>
-                      </td>
-                      <td className="px-3 py-2"><input value={d.net_pips} onChange={(e) => setEditDraft((p) => ({ ...p, [l.id]: { ...d, net_pips: e.target.value } }))} className="w-24 rounded border border-slate-600 bg-slate-950 px-2 py-1" /></td>
-                      <td className="px-3 py-2"><input value={d.peak_pips} onChange={(e) => setEditDraft((p) => ({ ...p, [l.id]: { ...d, peak_pips: e.target.value } }))} className="w-24 rounded border border-slate-600 bg-slate-950 px-2 py-1" /></td>
-                      <td className="px-3 py-2"><input value={d.note} onChange={(e) => setEditDraft((p) => ({ ...p, [l.id]: { ...d, note: e.target.value } }))} className="w-48 rounded border border-slate-600 bg-slate-950 px-2 py-1" /></td>
-                      <td className="px-3 py-2">
-                        <div className="flex gap-1">
-                          <button onClick={() => void saveLog(l.id)} className="rounded bg-blue-600 px-3 py-1">Save</button>
-                          <button onClick={() => void deleteLog(l.id)} className="rounded bg-rose-700 px-3 py-1">Delete</button>
-                        </div>
-                      </td>
+                      <td className="px-3 py-2">{l.outcome.toUpperCase()}</td>
+                      <td className="px-3 py-2">{Number(l.net_pips).toFixed(1)}</td>
+                      <td className="px-3 py-2">{l.peak_pips === null ? "-" : String(l.peak_pips)}</td>
+                      <td className="px-3 py-2 text-slate-400">-</td>
                     </tr>
                   );
                 })}
