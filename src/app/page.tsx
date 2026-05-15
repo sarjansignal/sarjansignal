@@ -370,7 +370,7 @@ export default function LandingPage() {
       </section>
 
       <footer className={`border-t py-10 text-center text-[10px] font-black uppercase tracking-[0.22em] ${isDark ? "border-white/10 text-white/30" : "border-[#0f172a]/10 text-[#0f172a]/40"}`}>
-        (C) 2026 SARJAN SIGNAL SYSTEM | Powered by EZ Ecosystem
+        (C) 2026 SARJAN SIGNAL SYSTEM
       </footer>
 
       {activeTestimonialIndex !== null && (
