@@ -1,22 +1,32 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useEffect, useState } from "react";
 
 export default function LandingPage() {
-  const [lang, setLang] = useState<"en" | "my">("en");
+  const [lang, setLang] = useState<"en" | "my">("my");
   const [theme, setTheme] = useState<"dark" | "light">("dark");
+  const [activeTestimonialIndex, setActiveTestimonialIndex] = useState<number | null>(null);
+  const testimonialImages = [
+    "/testimoni-sarjan/1.png",
+    "/testimoni-sarjan/2.png",
+    "/testimoni-sarjan/3.png",
+    "/testimoni-sarjan/4.png",
+    "/testimoni-sarjan/5.png",
+    "/testimoni-sarjan/6.png",
+  ];
   const t = {
     navTagline: lang === "en" ? "Profitable Discipline Starts Here" : "Disiplin Profit Bermula Di Sini",
-    badge: lang === "en" ? "Elite XAUUSD Signal Intelligence" : "Kepintaran Signal XAUUSD Elit",
+    badge: lang === "en" ? "Elite XAUUSD Signal Intelligence" : "MISI MEMBURU PIPS XAUUSD",
     hero:
       lang === "en"
         ? "Profit Consistently Like a Pro Trader Even as a Newbie."
         : "Konsisten Profit Macam Pro Trader Walau Masih Newbie.",
     desc:
       lang === "en"
-        ? "Straight to the point. Follow a simple A-B-C flow with professional risk guidance and precise execution."
-        : "Straight to the point. Follow semudah A-B-C dengan panduan risiko profesional dan execution tepat.",
+        ? "Prepare your ammo. We'll complete the mission together."
+        : "Sediakan peluru. Kita selesaikan misi bersama.",
     cta: lang === "en" ? "Join The Mission" : "Sertai Misi Sekarang",
     login: "Log In",
     pricingTitle: lang === "en" ? "Choose Your Access Key_" : "Pilih Kod Akses Anda_",
@@ -91,6 +101,16 @@ export default function LandingPage() {
 
       <header className="mx-auto max-w-5xl px-6 pb-20 pt-24 text-center">
         <div className={`rounded-[2rem] px-6 py-10 md:px-10 ${isDark ? "" : "border border-[#0f172a]/10 bg-white/45 shadow-[0_18px_45px_rgba(15,23,42,0.12)] backdrop-blur-xl"}`}>
+          <div className="mb-8 flex items-center justify-center">
+            <Image
+              src="/sarjan-logo-big.png"
+              alt="SARJAN SIGNAL"
+              width={280}
+              height={280}
+              priority
+              className={`h-auto w-auto max-h-[220px] object-contain ${isDark ? "drop-shadow-[0_20px_50px_rgba(37,99,235,0.35)]" : "drop-shadow-[0_16px_40px_rgba(15,23,42,0.2)]"}`}
+            />
+          </div>
           <div className={`mb-8 inline-block rounded-full px-4 py-1 text-[10px] font-black uppercase tracking-widest backdrop-blur-md ${isDark ? "border border-blue-400/40 bg-gradient-to-r from-blue-500/20 to-cyan-400/20 text-blue-300 shadow-[0_0_30px_rgba(37,99,235,0.35)]" : "border border-blue-400/50 bg-blue-100 text-blue-700 shadow-[0_8px_22px_rgba(37,99,235,0.2)]"}`}>
             {t.badge}
           </div>
@@ -185,6 +205,36 @@ export default function LandingPage() {
         </div>
       </section>
 
+      <section className="mx-auto max-w-7xl px-6 pb-14">
+        <h2 className="mb-3 text-center text-3xl font-black uppercase tracking-tight">Bukti Misi Member</h2>
+        <p className={`mx-auto mb-8 max-w-2xl text-center text-sm md:text-base ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+          Hasil sebenar pengguna SARJAN SIGNAL.
+        </p>
+        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          {testimonialImages.map((src, index) => (
+            <button
+              key={src}
+              type="button"
+              onClick={() => setActiveTestimonialIndex(index)}
+              className={`group relative overflow-hidden rounded-2xl border text-left transition hover:-translate-y-1 ${
+                isDark
+                  ? "border-white/12 bg-slate-900/50 hover:border-blue-400/60 hover:shadow-[0_20px_45px_rgba(37,99,235,0.25)]"
+                  : "border-[#0f172a]/12 bg-white/90 hover:border-blue-500/40 hover:shadow-[0_20px_45px_rgba(15,23,42,0.18)]"
+              }`}
+            >
+              <div className="relative h-[620px] w-full p-2">
+                <Image
+                  src={src}
+                  alt={`Testimoni ${index + 1}`}
+                  fill
+                  className="object-contain transition duration-300 group-hover:scale-[1.02]"
+                />
+              </div>
+            </button>
+          ))}
+        </div>
+      </section>
+
       <section id="pricing" className="mx-auto max-w-7xl px-6 py-20 text-center">
         <h2 className="mb-10 text-4xl font-black uppercase tracking-tight">{t.pricingTitle}</h2>
         <p className={`mx-auto mb-10 max-w-2xl text-sm md:text-base ${isDark ? "text-slate-400" : "text-slate-600"}`}>{t.pricingSub}</p>
@@ -214,12 +264,11 @@ export default function LandingPage() {
                 <li>• Scalping Every 30 Min</li>
                 <li>• Intraday 6 Times</li>
                 <li>• Tactical Risk Planner</li>
-                <li>• Group Support Access</li>
                 <li>• Instant Notifications</li>
                 <li>• Performance Dashboard</li>
               </ul>
               <Link
-                href="/access"
+                href="https://t.me/sarjansignal"
                 className={`mt-auto block w-full rounded-2xl py-4 text-xs font-black uppercase tracking-[0.16em] ${plan.active ? "bg-blue-600 hover:bg-blue-700 text-white" : isDark ? "border border-white/20 bg-white/5 text-white hover:bg-white/10" : "border border-[#0f172a]/20 bg-white text-[#0f172a] hover:bg-slate-100"}`}
               >
                 {lang === "en" ? "Get Access" : "Dapatkan Akses"}
@@ -323,6 +372,48 @@ export default function LandingPage() {
       <footer className={`border-t py-10 text-center text-[10px] font-black uppercase tracking-[0.22em] ${isDark ? "border-white/10 text-white/30" : "border-[#0f172a]/10 text-[#0f172a]/40"}`}>
         (C) 2026 SARJAN SIGNAL SYSTEM | Powered by EZ Ecosystem
       </footer>
+
+      {activeTestimonialIndex !== null && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/85 p-4">
+          <button
+            type="button"
+            onClick={() => setActiveTestimonialIndex(null)}
+            className="absolute right-4 top-4 rounded-xl border border-white/25 bg-black/40 px-3 py-2 text-sm font-bold text-white hover:bg-black/60"
+          >
+            Close
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              setActiveTestimonialIndex((prev) =>
+                prev === null ? 0 : (prev - 1 + testimonialImages.length) % testimonialImages.length
+              )
+            }
+            className="absolute left-4 rounded-xl border border-white/25 bg-black/40 px-3 py-2 text-sm font-bold text-white hover:bg-black/60"
+          >
+            Prev
+          </button>
+          <div className="relative mx-12 h-[88vh] w-full max-w-[680px]">
+            <Image
+              src={testimonialImages[activeTestimonialIndex]}
+              alt={`Testimoni ${activeTestimonialIndex + 1}`}
+              fill
+              className="rounded-2xl object-contain"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() =>
+              setActiveTestimonialIndex((prev) =>
+                prev === null ? 0 : (prev + 1) % testimonialImages.length
+              )
+            }
+            className="absolute right-4 rounded-xl border border-white/25 bg-black/40 px-3 py-2 text-sm font-bold text-white hover:bg-black/60"
+          >
+            Next
+          </button>
+        </div>
+      )}
     </main>
   );
 }

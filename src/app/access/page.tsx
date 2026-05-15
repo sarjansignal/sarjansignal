@@ -594,7 +594,7 @@ export default function Home() {
         <section className={`scanlines w-full max-w-md rounded-xl p-6 ${loginDark ? "border border-emerald-500/50 bg-black/80 shadow-[0_0_40px_rgba(16,185,129,0.2)]" : "border border-[#0f172a]/20 bg-[#f8fafc] shadow-[0_10px_30px_rgba(15,23,42,0.14)]"}`}>
           <div className="mb-4 flex justify-center">
             <Image
-              src="/sarjan-logo.png"
+              src="/sarjan-logo-big.png"
               alt="SARJAN SIGNAL logo"
               width={130}
               height={130}
