@@ -2,12 +2,56 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 export default function LandingPage() {
   const [lang, setLang] = useState<"en" | "my">("my");
-  const [theme, setTheme] = useState<"dark" | "light">("dark");
+  const [theme, setTheme] = useState<"dark" | "light">("light");
   const [activeTestimonialIndex, setActiveTestimonialIndex] = useState<number | null>(null);
+  const statsSectionRef = useRef<HTMLElement | null>(null);
+  const metrics = useMemo(
+    () => [
+      {
+        label: "Total Pips",
+        target: 1505.7,
+        decimals: 1,
+        prefix: "+",
+        suffix: "",
+        darkColor: "text-emerald-400",
+        lightColor: "text-emerald-500",
+      },
+      {
+        label: lang === "en" ? "Win Rate" : "Kadar Menang",
+        target: 96.3,
+        decimals: 1,
+        prefix: "",
+        suffix: "%",
+        darkColor: "text-blue-400",
+        lightColor: "text-blue-500",
+      },
+      {
+        label: "Hit TP",
+        target: 88.4,
+        decimals: 1,
+        prefix: "",
+        suffix: "%",
+        darkColor: "text-white",
+        lightColor: "text-[#0f172a]",
+      },
+      {
+        label: "Drawdown",
+        target: 4.2,
+        decimals: 1,
+        prefix: "",
+        suffix: "%",
+        darkColor: "text-rose-500",
+        lightColor: "text-rose-600",
+      },
+    ],
+    [lang],
+  );
+  const [animatedMetrics, setAnimatedMetrics] = useState<number[]>(() => metrics.map(() => 0));
+  const [animationRunId, setAnimationRunId] = useState(0);
   const testimonialImages = [
     "/testimoni-sarjan/1.png",
     "/testimoni-sarjan/2.png",
@@ -34,6 +78,8 @@ export default function LandingPage() {
       lang === "en"
         ? "Choose your mission duration and unlock disciplined execution."
         : "Pilih tempoh misi anda dan unlock execution berdisiplin.",
+    howTitle: lang === "en" ? "How Sarjan Works_" : "Cara Dapatkan Sarjan Signal_",
+    whyTitle: lang === "en" ? "Why Sarjan Signal_" : "Kenapa Sarjan Signal_",
     testimonialsTitle: lang === "en" ? "Mission Reports (Testimonials)_" : "Laporan Misi (Testimoni)_",
     faqTitle: lang === "en" ? "Tactical Briefing (FAQ)_" : "Taklimat Taktikal (FAQ)_",
   };
@@ -41,14 +87,73 @@ export default function LandingPage() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const saved = window.localStorage.getItem("sarjan-landing-theme");
+    const saved = window.localStorage.getItem("sarjan-landing-theme-v2");
     if (saved === "dark" || saved === "light") setTheme(saved);
   }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    window.localStorage.setItem("sarjan-landing-theme", theme);
+    window.localStorage.setItem("sarjan-landing-theme-v2", theme);
   }, [theme]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const revealNodes = Array.from(document.querySelectorAll<HTMLElement>(".sarjan-reveal"));
+    if (!revealNodes.length) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          entry.target.classList.add("is-visible");
+          observer.unobserve(entry.target);
+        }
+      },
+      { threshold: 0.16, rootMargin: "0px 0px -8% 0px" },
+    );
+
+    for (const node of revealNodes) observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!statsSectionRef.current) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const [entry] = entries;
+        if (entry.isIntersecting) {
+          setAnimationRunId((prev) => prev + 1);
+        }
+      },
+      { threshold: 0.35 },
+    );
+
+    observer.observe(statsSectionRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (animationRunId === 0) return;
+
+    let frameId = 0;
+    const durationMs = 1400;
+    const start = performance.now();
+
+    setAnimatedMetrics(metrics.map(() => 0));
+
+    const tick = (now: number) => {
+      const progress = Math.min((now - start) / durationMs, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setAnimatedMetrics(metrics.map((metric) => metric.target * eased));
+      if (progress < 1) {
+        frameId = window.requestAnimationFrame(tick);
+      }
+    };
+
+    frameId = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(frameId);
+  }, [animationRunId, metrics]);
 
   return (
     <main className={`min-h-screen ${isDark ? "bg-[#020617] text-white" : "bg-[#dbe5f3] text-[#0f172a]"}`}>
@@ -138,18 +243,137 @@ export default function LandingPage() {
         </div>
       </header>
 
-      <section className="mx-auto grid w-full max-w-7xl grid-cols-2 gap-6 px-6 pb-8 md:grid-cols-4">
-        {[
-          { label: "Total Pips", value: "+1505.7", darkColor: "text-emerald-400", lightColor: "text-emerald-500" },
-          { label: lang === "en" ? "Win Rate" : "Kadar Menang", value: "96.3%", darkColor: "text-blue-400", lightColor: "text-blue-500" },
-          { label: "Hit TP", value: "88.4%", darkColor: "text-white", lightColor: "text-[#0f172a]" },
-          { label: "Drawdown", value: "4.2%", darkColor: "text-rose-500", lightColor: "text-rose-600" },
-        ].map((item) => (
-          <div key={item.label} className={`rounded-3xl border p-6 text-center backdrop-blur-xl ${isDark ? "border-white/12 bg-gradient-to-b from-slate-800/55 to-slate-900/45 shadow-[0_16px_40px_rgba(2,6,23,0.45)]" : "border-[#0f172a]/12 bg-gradient-to-b from-white/90 to-[#eef4ff] shadow-[0_16px_40px_rgba(15,23,42,0.15)]"}`}>
+      <section ref={statsSectionRef} className="mx-auto grid w-full max-w-7xl grid-cols-2 gap-6 px-6 pb-8 md:grid-cols-4">
+        {metrics.map((item, index) => (
+          <div
+            key={item.label}
+            className={`sarjan-reveal rounded-3xl border p-6 text-center backdrop-blur-xl transition duration-300 hover:-translate-y-1 ${isDark ? "border-white/12 bg-gradient-to-b from-slate-800/55 to-slate-900/45 shadow-[0_16px_40px_rgba(2,6,23,0.45)] hover:shadow-[0_22px_55px_rgba(2,6,23,0.55)]" : "border-[#0f172a]/12 bg-gradient-to-b from-white/90 to-[#eef4ff] shadow-[0_16px_40px_rgba(15,23,42,0.15)] hover:shadow-[0_22px_55px_rgba(15,23,42,0.2)]"}`}
+            style={{ animationDelay: `${index * 90}ms` }}
+          >
             <p className={`mb-2 text-[10px] font-black uppercase tracking-[0.18em] ${isDark ? "text-white/40" : "text-[#0f172a]/45"}`}>{item.label}</p>
-            <p className={`font-mono text-3xl font-black ${isDark ? item.darkColor : item.lightColor}`}>{item.value}</p>
+            <p
+              className={`font-mono tabular-nums text-4xl font-black leading-none md:text-[2.7rem] ${
+                isDark
+                  ? `${item.darkColor} drop-shadow-[0_0_14px_rgba(37,99,235,0.22)]`
+                  : `${item.lightColor} drop-shadow-[0_8px_18px_rgba(15,23,42,0.15)]`
+              }`}
+            >
+              {item.prefix}
+              {animatedMetrics[index].toFixed(item.decimals)}
+              {item.suffix}
+            </p>
           </div>
         ))}
+      </section>
+
+      <section className="mx-auto max-w-7xl px-6 py-14">
+        <h2 className="mb-10 text-center text-3xl font-black uppercase tracking-tight">{t.howTitle}</h2>
+        <div className="grid gap-6 md:grid-cols-3">
+          {[
+            {
+              step: "LANGKAH 1",
+              title: lang === "en" ? "Choose Mission Package" : "Pilih Pakej Misi",
+              desc:
+                lang === "en"
+                  ? "Choose 7D, 15D, or 30D based on your trading rhythm."
+                  : "7 Hari, 15 Hari, atau 30 Hari",
+            },
+            {
+              step: "LANGKAH 2",
+              title: lang === "en" ? "Receive Access Key" : "Terima Kod Akses",
+              desc:
+                lang === "en"
+                  ? "Access key is issued after registration and securely locked to your device."
+                  : "Kod akses dihantar selepas pendaftaran",
+            },
+            {
+              step: "LANGKAH 3",
+              title: lang === "en" ? "Execute with Planner" : "Trade Dengan Planner",
+              desc:
+                lang === "en"
+                  ? "Follow Entry, TP, SL and lot guidance directly from tactical dashboard."
+                  : "Entry, TP, SL dan panduan lot",
+            },
+          ].map((item, index) => (
+            <div
+              key={item.step}
+              className={`sarjan-reveal rounded-3xl border p-6 backdrop-blur-xl transition duration-300 hover:-translate-y-1 ${isDark ? "border-white/12 bg-gradient-to-b from-slate-800/55 to-slate-900/45 shadow-[0_16px_40px_rgba(2,6,23,0.45)] hover:shadow-[0_24px_56px_rgba(2,6,23,0.55)]" : "border-[#0f172a]/12 bg-gradient-to-b from-white/90 to-[#eef4ff] shadow-[0_16px_40px_rgba(15,23,42,0.15)] hover:shadow-[0_24px_56px_rgba(15,23,42,0.2)]"}`}
+              style={{ animationDelay: `${index * 110}ms` }}
+            >
+              <p className="mb-2 text-[10px] font-black uppercase tracking-[0.18em] text-blue-500">{item.step}</p>
+              <h3 className={`mb-3 text-2xl font-black uppercase ${isDark ? "text-white" : "text-[#0f172a]"}`}>{item.title}</h3>
+              <p className={`text-base leading-relaxed ${isDark ? "text-slate-300" : "text-slate-600"}`}>{item.desc}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="mx-auto max-w-7xl px-6 pb-16">
+        <h2 className="mb-10 text-center text-3xl font-black uppercase tracking-tight">{t.whyTitle}</h2>
+        <div className={`overflow-hidden rounded-3xl border ${isDark ? "border-white/12 bg-slate-900/55" : "border-[#0f172a]/12 bg-white/80"}`}>
+          <div className={`grid grid-cols-3 px-5 py-4 text-xs font-black uppercase tracking-[0.14em] ${isDark ? "bg-white/5 text-slate-300" : "bg-[#eef4ff] text-slate-700"}`}>
+            <p>Kategori</p>
+            <p className="text-blue-500">Sarjan Signal</p>
+            <p>{lang === "en" ? "Generic Signal" : "Signal Biasa"}</p>
+          </div>
+
+          {[
+            {
+              label: lang === "en" ? "Signal Clarity" : "Format Signal",
+              sarjan:
+                lang === "en"
+                  ? "Entry + TP1-TP3 + SL in one clear flow"
+                  : "Entry + TP1 + TP2 + TP3 + SL yang mudah ikut",
+              generic:
+                lang === "en"
+                  ? "Mixed messages and unclear setup quality"
+                  : "Arahan bercampur dan setup kurang jelas",
+            },
+            {
+              label: lang === "en" ? "Risk Control" : "Pengawalan Risiko",
+              sarjan:
+                lang === "en"
+                  ? "Built-in tactical lot planner"
+                  : "Tactical lot planner untuk pengawalan risiko",
+              generic:
+                lang === "en"
+                  ? "No consistent position sizing guide"
+                  : "Tiada panduan saiz posisi yang konsisten",
+            },
+            {
+              label: lang === "en" ? "Performance Tracking" : "Rekod Rujukan",
+              sarjan:
+                lang === "en"
+                  ? "Structured log for outcome review"
+                  : "Prestasi log berstruktur untuk semakan",
+              generic:
+                lang === "en"
+                  ? "No reliable record to review edge"
+                  : "Tiada audit prestasi sebenar",
+            },
+            {
+              label: lang === "en" ? "Execution Simplicity" : "User Friendly",
+              sarjan:
+                lang === "en"
+                  ? "Mobile-ready dashboard for fast action"
+                  : "Dashboard mesra telefon, mudah guna di mana-mana",
+              generic:
+                lang === "en"
+                  ? "Fragmented alerts across multiple chats"
+                  : "Alert berpecah di banyak tempat",
+            },
+          ].map((row, index) => (
+            <div
+              key={row.label}
+              className={`sarjan-reveal grid grid-cols-3 gap-4 px-5 py-4 text-sm border-t ${isDark ? "border-white/10" : "border-[#0f172a]/10"}`}
+              style={{ animationDelay: `${index * 80}ms` }}
+            >
+              <p className={`font-bold ${isDark ? "text-white" : "text-[#0f172a]"}`}>{row.label}</p>
+              <p className={isDark ? "text-slate-100" : "text-slate-800"}>{row.sarjan}</p>
+              <p className={isDark ? "text-slate-400" : "text-slate-600"}>{row.generic}</p>
+            </div>
+          ))}
+        </div>
       </section>
 
       <section className="mx-auto max-w-7xl px-6 py-20">
@@ -196,8 +420,12 @@ export default function LandingPage() {
               my: '"Puas hati setup intraday. Pips lebat!"',
               name: "Zack Scalper",
             },
-          ].map((item) => (
-            <div key={item.name} className={`rounded-3xl border p-6 backdrop-blur-xl ${isDark ? "border-white/12 bg-gradient-to-b from-slate-800/55 to-slate-900/45 shadow-[0_16px_40px_rgba(2,6,23,0.45)]" : "border-[#0f172a]/12 bg-gradient-to-b from-white/90 to-[#eef4ff] shadow-[0_16px_40px_rgba(15,23,42,0.15)]"}`}>
+          ].map((item, index) => (
+            <div
+              key={item.name}
+              className={`sarjan-reveal rounded-3xl border p-6 backdrop-blur-xl ${isDark ? "border-white/12 bg-gradient-to-b from-slate-800/55 to-slate-900/45 shadow-[0_16px_40px_rgba(2,6,23,0.45)]" : "border-[#0f172a]/12 bg-gradient-to-b from-white/90 to-[#eef4ff] shadow-[0_16px_40px_rgba(15,23,42,0.15)]"}`}
+              style={{ animationDelay: `${index * 80}ms` }}
+            >
               <p className={`mb-4 text-sm italic ${isDark ? "text-slate-400" : "text-slate-600"}`}>{lang === "en" ? item.en : item.my}</p>
               <p className="text-xs font-black uppercase tracking-[0.14em] text-blue-500">- {item.name}</p>
             </div>
@@ -216,11 +444,12 @@ export default function LandingPage() {
               key={src}
               type="button"
               onClick={() => setActiveTestimonialIndex(index)}
-              className={`group relative overflow-hidden rounded-2xl border text-left transition hover:-translate-y-1 ${
+              className={`sarjan-reveal group relative overflow-hidden rounded-2xl border text-left transition hover:-translate-y-1 ${
                 isDark
                   ? "border-white/12 bg-slate-900/50 hover:border-blue-400/60 hover:shadow-[0_20px_45px_rgba(37,99,235,0.25)]"
                   : "border-[#0f172a]/12 bg-white/90 hover:border-blue-500/40 hover:shadow-[0_20px_45px_rgba(15,23,42,0.18)]"
               }`}
+              style={{ animationDelay: `${index * 70}ms` }}
             >
               <div className="relative h-[620px] w-full p-2">
                 <Image
@@ -243,10 +472,11 @@ export default function LandingPage() {
             { name: "7 Days", original: "129 USD", promo: "99 USD", active: false, badge: "" },
             { name: "15 Days", original: "249 USD", promo: "199 USD", active: true, badge: "Most Popular" },
             { name: "30 Days", original: "299 USD", promo: "249 USD", active: false, badge: "" },
-          ].map((plan) => (
+          ].map((plan, index) => (
             <div
               key={plan.name}
-              className={`rounded-[2rem] border p-8 backdrop-blur-xl ${plan.active ? isDark ? "scale-[1.03] border-blue-500 bg-gradient-to-b from-blue-600/25 to-slate-900/65 shadow-[0_24px_60px_rgba(37,99,235,0.35)]" : "scale-[1.03] border-blue-400 bg-gradient-to-b from-[#dce8ff] to-[#c5d7fb] shadow-[0_24px_60px_rgba(37,99,235,0.22)]" : isDark ? "border-white/12 bg-gradient-to-b from-slate-800/55 to-slate-900/45 shadow-[0_16px_40px_rgba(2,6,23,0.45)]" : "border-[#0f172a]/12 bg-gradient-to-b from-white/90 to-[#eef4ff] shadow-[0_16px_40px_rgba(15,23,42,0.15)]"}`}
+              className={`sarjan-reveal rounded-[2rem] border p-8 backdrop-blur-xl ${plan.active ? isDark ? "scale-[1.03] border-blue-500 bg-gradient-to-b from-blue-600/25 to-slate-900/65 shadow-[0_24px_60px_rgba(37,99,235,0.35)]" : "scale-[1.03] border-blue-400 bg-gradient-to-b from-[#dce8ff] to-[#c5d7fb] shadow-[0_24px_60px_rgba(37,99,235,0.22)]" : isDark ? "border-white/12 bg-gradient-to-b from-slate-800/55 to-slate-900/45 shadow-[0_16px_40px_rgba(2,6,23,0.45)]" : "border-[#0f172a]/12 bg-gradient-to-b from-white/90 to-[#eef4ff] shadow-[0_16px_40px_rgba(15,23,42,0.15)]"}`}
+              style={{ animationDelay: `${index * 110}ms` }}
             >
               {plan.badge && (
                 <p className={`mb-4 inline-block rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] ${isDark ? "border border-blue-400/50 bg-blue-500/20 text-blue-300" : "border border-blue-500/40 bg-blue-100 text-blue-700"}`}>
@@ -360,8 +590,12 @@ export default function LandingPage() {
                   ? "Yes. The flow is beginner-friendly and disciplined."
                   : "Ya. Flow ini mesra beginner dan berasaskan disiplin.",
             },
-          ].map((faq) => (
-            <details key={faq.q} className={`rounded-3xl border p-6 backdrop-blur-xl ${isDark ? "border-white/12 bg-gradient-to-b from-slate-800/55 to-slate-900/45 shadow-[0_14px_30px_rgba(2,6,23,0.35)]" : "border-[#0f172a]/12 bg-gradient-to-b from-white/90 to-[#eef4ff] shadow-[0_14px_30px_rgba(15,23,42,0.15)]"}`}>
+          ].map((faq, index) => (
+            <details
+              key={faq.q}
+              className={`sarjan-reveal rounded-3xl border p-6 backdrop-blur-xl ${isDark ? "border-white/12 bg-gradient-to-b from-slate-800/55 to-slate-900/45 shadow-[0_14px_30px_rgba(2,6,23,0.35)]" : "border-[#0f172a]/12 bg-gradient-to-b from-white/90 to-[#eef4ff] shadow-[0_14px_30px_rgba(15,23,42,0.15)]"}`}
+              style={{ animationDelay: `${index * 65}ms` }}
+            >
               <summary className="cursor-pointer list-none text-left text-xs font-bold uppercase tracking-[0.16em]">{faq.q}</summary>
               <p className={`pt-4 text-sm ${isDark ? "text-slate-400" : "text-slate-600"}`}>{faq.a}</p>
             </details>
