@@ -36,12 +36,6 @@ export default function LandingPage() {
         : "Pilih tempoh misi anda dan unlock execution berdisiplin.",
     testimonialsTitle: lang === "en" ? "Mission Reports (Testimonials)_" : "Laporan Misi (Testimoni)_",
     faqTitle: lang === "en" ? "Tactical Briefing (FAQ)_" : "Taklimat Taktikal (FAQ)_",
-    openInBrowser: lang === "en" ? "Open in Chrome" : "Buka di Chrome",
-    backupLink: lang === "en" ? "Use Backup Link" : "Guna Backup Link",
-    backupHint:
-      lang === "en"
-        ? "If the page fails in WhatsApp/Telegram browser, open using Chrome or use backup link."
-        : "Jika page gagal dalam browser WhatsApp/Telegram, buka guna Chrome atau guna backup link.",
   };
   const isDark = theme === "dark";
 
@@ -104,30 +98,6 @@ export default function LandingPage() {
           </div>
         </div>
       </nav>
-
-      <div className="mx-auto w-full max-w-7xl px-6 pt-4">
-        <div className={`rounded-2xl border p-3 ${isDark ? "border-blue-400/30 bg-blue-500/10" : "border-blue-500/25 bg-blue-100/70"}`}>
-          <div className="flex flex-wrap items-center justify-center gap-2">
-            <a
-              href="https://sarjansignal.ezos.my"
-              target="_blank"
-              rel="noopener noreferrer"
-              className={`rounded-xl px-3 py-2 text-xs font-bold uppercase tracking-[0.12em] ${isDark ? "border border-white/20 bg-white/10 text-white hover:bg-white/20" : "border border-[#0f172a]/15 bg-white text-[#0f172a] hover:bg-slate-100"}`}
-            >
-              {t.openInBrowser}
-            </a>
-            <a
-              href="https://sarjansignal.vercel.app"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-bold uppercase tracking-[0.12em] text-white hover:bg-blue-700"
-            >
-              {t.backupLink}
-            </a>
-          </div>
-          <p className={`mt-2 text-center text-[11px] ${isDark ? "text-slate-300" : "text-slate-700"}`}>{t.backupHint}</p>
-        </div>
-      </div>
 
       <header className="mx-auto max-w-5xl px-6 pb-20 pt-24 text-center">
         <div className={`rounded-[2rem] px-6 py-10 md:px-10 ${isDark ? "" : "border border-[#0f172a]/10 bg-white/45 shadow-[0_18px_45px_rgba(15,23,42,0.12)] backdrop-blur-xl"}`}>
