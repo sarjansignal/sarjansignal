@@ -52,6 +52,14 @@ function readDurationDays(row: PackageLinkRow, fallback = 7) {
   return fallback;
 }
 
+function parseChatIds(value: string | null | undefined) {
+  if (!value) return [] as string[];
+  return value
+    .split(/[\n,;]+/g)
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
 function isLinkUnavailable(link: PackageLinkRow) {
   if (!link.is_active) return "Invalid or inactive link";
 
@@ -82,7 +90,7 @@ async function sendTelegramRegisterAlert(payload: {
   isExistingSubscriber: boolean;
 }) {
   let botToken = process.env.TELEGRAM_BOT_TOKEN?.trim() ?? "";
-  let chatId = process.env.TELEGRAM_CHAT_ID?.trim() ?? "";
+  let chatIds = parseChatIds(process.env.TELEGRAM_CHAT_ID ?? "");
 
   try {
     const { data } = await payload.admin
@@ -95,17 +103,17 @@ async function sendTelegramRegisterAlert(payload: {
     if (data?.is_active !== false) {
       const dbToken =
         typeof data?.bot_token_secret_ref === "string" ? data.bot_token_secret_ref.trim() : "";
-      const dbChatId = typeof data?.channel_id === "string" ? data.channel_id.trim() : "";
-      if (dbToken && dbChatId) {
+      const dbChatIds = parseChatIds(typeof data?.channel_id === "string" ? data.channel_id : "");
+      if (dbToken && dbChatIds.length > 0) {
         botToken = dbToken;
-        chatId = dbChatId;
+        chatIds = dbChatIds;
       }
     }
   } catch {
     // Fallback to env token/chat id if config read fails.
   }
 
-  if (!botToken || !chatId) return;
+  if (!botToken || chatIds.length === 0) return;
 
   const message = [
     `*New ${brandDisplayName(payload.brandId)} Registration*`,
@@ -120,18 +128,21 @@ async function sendTelegramRegisterAlert(payload: {
     `*Token:* \`${payload.linkToken}\``,
   ].join("\n");
 
-  try {
-    await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: message,
-        parse_mode: "Markdown",
-      }),
-    });
-  } catch {
-    // Alert failures must not block registration.
+  const targetChatIds = [...new Set(chatIds)];
+  for (const chatId of targetChatIds) {
+    try {
+      await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: message,
+          parse_mode: "Markdown",
+        }),
+      });
+    } catch {
+      // Alert failures must not block registration.
+    }
   }
 }
 
