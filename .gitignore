@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local dev logs
+.devserver-*.log
+
+# local media/test folder
+Testimoni Sarjan Signal/
