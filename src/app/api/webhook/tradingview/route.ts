@@ -195,6 +195,7 @@ export async function POST(req: NextRequest) {
       .eq("pair", pair)
       .eq("mode", mode)
       .eq("status", "active")
+      .is("master_signal_id", null)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -301,6 +302,7 @@ export async function POST(req: NextRequest) {
       .eq("pair", pair)
       .eq("mode", mode)
       .eq("status", "active")
+      .is("master_signal_id", null)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -379,6 +381,7 @@ export async function POST(req: NextRequest) {
       .eq("mode", mode)
       .eq("action", type)
       .eq("status", "active")
+      .is("master_signal_id", null)
       .gte("created_at", cooldownFromIso)
       .order("created_at", { ascending: false })
       .limit(1)
@@ -409,6 +412,7 @@ export async function POST(req: NextRequest) {
       .eq("pair", pair)
       .eq("mode", mode)
       .eq("status", "active")
+      .is("master_signal_id", null)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
